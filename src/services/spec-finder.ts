@@ -4,8 +4,35 @@ import { glob } from "tinyglobby";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { normalizePath, resolveInsideRoot } from "../utils/paths.js";
-import { SpecNotFoundError, SpecOutsideProjectError } from "../utils/errors.js";
+import {
+  InvalidArgumentError,
+  SpecNotFoundError,
+  SpecOutsideProjectError,
+} from "../utils/errors.js";
 import type { Logger } from "../utils/logger.js";
+
+const MAX_GLOB_LENGTH = 1024;
+// +(..) @(..) !(..) *(..) ?(..): the extglob forms behind picomatch ReDoS
+// advisories such as GHSA-fc5q-39xc-vjpf. Spec patterns never need them.
+const EXTGLOB_GROUP = /[+@!*?]\(/;
+
+/**
+ * Guard for glob patterns that come from a tool caller rather than the
+ * project's own Cypress config. Throws InvalidArgumentError when the pattern
+ * uses extglob groups or is unreasonably long.
+ */
+export function assertPlainGlob(pattern: string): void {
+  if (pattern.length > MAX_GLOB_LENGTH) {
+    throw new InvalidArgumentError(
+      `Glob pattern is too long (${pattern.length} characters, max ${MAX_GLOB_LENGTH}).`,
+    );
+  }
+  if (EXTGLOB_GROUP.test(pattern)) {
+    throw new InvalidArgumentError(
+      "Extended glob groups such as +(a|b) are not supported. Use braces, for example {a,b}.",
+    );
+  }
+}
 
 export class SpecFinder {
   constructor(

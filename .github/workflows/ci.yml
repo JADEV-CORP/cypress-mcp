@@ -48,4 +48,5 @@ jobs:
 
       - name: Audit production dependencies
         if: matrix.os == 'ubuntu-latest' && matrix.node-version == 24
-        run: npm audit --omit=dev --audit-level=moderate
+        # Moderate and above fail, except advisories in audit-allowlist.json until their date.
+        run: node scripts/audit-prod.mjs

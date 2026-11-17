@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import path from "node:path";
-import { SpecFinder } from "../../src/services/spec-finder.js";
+import { SpecFinder, assertPlainGlob } from "../../src/services/spec-finder.js";
 import { createLogger } from "../../src/utils/logger.js";
 
 const fixtureRoot = path.resolve("test/fixtures/cypress-project");
@@ -60,5 +60,34 @@ describe("SpecFinder", () => {
     ]);
 
     expect(specs.some((s) => s.includes("sample.cy.ts"))).toBe(true);
+  });
+});
+
+describe("assertPlainGlob", () => {
+  it("accepts the usual spec patterns", () => {
+    for (const pattern of [
+      "cypress/e2e/**/*.cy.ts",
+      "cypress/e2e/**/*.cy.{ts,js,tsx,jsx}",
+      "cypress/e2e/[a-c]*.cy.ts",
+      "cypress/e2e/login?.cy.ts",
+    ]) {
+      expect(() => assertPlainGlob(pattern)).not.toThrow();
+    }
+  });
+
+  it("rejects extglob groups", () => {
+    for (const pattern of [
+      "+(a|b).cy.ts",
+      "**/@(x).cy.ts",
+      "!(skip)*.ts",
+      "*(a)",
+      "?(a)",
+    ]) {
+      expect(() => assertPlainGlob(pattern)).toThrow("Extended glob");
+    }
+  });
+
+  it("rejects oversized patterns", () => {
+    expect(() => assertPlainGlob("a".repeat(1025))).toThrow("too long");
   });
 });

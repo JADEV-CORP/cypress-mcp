@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1 (2026-11-17)
+
+First npm release since 0.1.1. The 0.2.0 tag never reached npm, so this version also ships everything listed under 0.2.0.
+
+### Security
+
+- `cypress_list_specs` rejects glob patterns with extglob groups such as `+(a|b)`, and patterns over 1,024 characters. picomatch has an open ReDoS advisory on those forms ([GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf)) with no patched release yet. Braces like `{a,b}` still work.
+- Updated zod to 4.6.7 ([GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)), and in the lockfile body-parser to 2.4.0 ([GHSA-27r3-jxmh-p828](https://github.com/advisories/GHSA-27r3-jxmh-p828)), fast-uri to 3.1.9 and hono to 4.13.19.
+
 ## 0.2.0 (2026-10-19)
 
 ### License
