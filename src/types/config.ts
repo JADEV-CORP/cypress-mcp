@@ -3,7 +3,11 @@
 export interface CypressMcpConfig {
   readonly projectRoot: string;
   readonly cypressConfigFile: string;
-  readonly defaultBrowser: string;
+  /**
+   * Browser passed to every run, from cypress-mcp.config.json only. When unset
+   * no --browser flag is sent, so Cypress uses the project's own choice.
+   */
+  readonly defaultBrowser?: string;
   readonly defaultTimeout: number;
   readonly screenshotsDir: string;
   readonly downloadsDir: string;
@@ -28,7 +32,6 @@ export interface RawServerConfig {
 
 export const DEFAULT_CONFIG: Omit<CypressMcpConfig, "projectRoot" | "cypressConfigFile"> =
   {
-    defaultBrowser: "electron",
     defaultTimeout: 300_000,
     screenshotsDir: "cypress/screenshots",
     downloadsDir: "cypress/downloads",

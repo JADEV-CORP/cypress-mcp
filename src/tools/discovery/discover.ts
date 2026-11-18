@@ -1,10 +1,9 @@
 // Copyright (c) 2026 JADEV GROUP SARL
 // SPDX-License-Identifier: Apache-2.0
-import fs from "node:fs/promises";
-import path from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ToolContext } from "../../types/index.js";
 import type { SpecSummary } from "../../types/results.js";
+import type { ParsedSpec } from "../../services/spec-parser.js";
 
 export function register(server: McpServer, ctx: ToolContext): void {
   server.tool(
@@ -16,15 +15,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
       const specFiles = await ctx.specFinder.findSpecs(config.specPattern);
 
       const specs: SpecSummary[] = await Promise.all(
-        specFiles.map(async (file) => {
-          const absolute = path.join(config.projectRoot, file);
-          try {
-            const content = await fs.readFile(absolute, "utf-8");
-            return parseSpecSummary(file, content);
-          } catch {
-            return { file, tests: 0, describes: [], testNames: [] };
-          }
-        }),
+        specFiles.map(async (file) => toSummary(file, await ctx.specFinder.parse(file))),
       );
 
       const totalTests = specs.reduce((sum, s) => sum + s.tests, 0);
@@ -60,20 +51,15 @@ export function register(server: McpServer, ctx: ToolContext): void {
   );
 }
 
-function parseSpecSummary(file: string, content: string): SpecSummary {
-  const describes: string[] = [];
-  const testNames: string[] = [];
-
-  const describeRegex = /describe\s*\(\s*['"`](.+?)['"`]/g;
-  let match: RegExpExecArray | null;
-  while ((match = describeRegex.exec(content)) !== null) {
-    if (match[1]) describes.push(match[1]);
+function toSummary(file: string, parsed: ParsedSpec | null): SpecSummary {
+  if (!parsed) {
+    return { file, tests: 0, describes: [], testNames: [] };
   }
 
-  const itRegex = /it(?:\.only|\.skip)?\s*\(\s*['"`](.+?)['"`]/g;
-  while ((match = itRegex.exec(content)) !== null) {
-    if (match[1]) testNames.push(match[1]);
-  }
-
-  return { file, tests: testNames.length, describes, testNames };
+  return {
+    file,
+    tests: parsed.tests.length,
+    describes: parsed.suites.map((suite) => suite.name),
+    testNames: parsed.tests.map((test) => test.name),
+  };
 }

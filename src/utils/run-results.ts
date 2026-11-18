@@ -21,6 +21,15 @@ export function buildRunSummary(
   spec: string,
   testName?: string,
 ): string {
+  if (result.errorKind === "compile") {
+    return `${spec} did not compile, no test ran: see data.error`;
+  }
+
+  if (result.errorKind === "timeout") {
+    const where = result.runningTest ? ` while running "${result.runningTest}"` : "";
+    return `Run timed out${where} in ${spec} after ${result.stats.passing} passing, ${result.stats.failing} failing`;
+  }
+
   if (result.error) {
     return testName
       ? `Cypress failed before executing "${testName}" in ${spec}`
@@ -74,7 +83,7 @@ function localNextActions(
   options?: { includeDiscoverOnSuccess?: boolean },
 ): string[] {
   if (result.error) {
-    return ["cypress_doctor", "cypress_get_last_run"];
+    return crashNextActions(result) ?? ["cypress_doctor", "cypress_get_last_run"];
   }
 
   if (result.stats.failing > 0) {
@@ -93,6 +102,29 @@ function localNextActions(
   }
 
   return [];
+}
+
+/**
+ * Next actions for a run that ended without a complete report, when the cause
+ * is known. The doctor launches Cypress (about 15 s) and finds nothing wrong
+ * with a project whose spec simply does not compile, so it is only suggested
+ * for unexplained crashes.
+ */
+export function crashNextActions(result: CypressRunResult): string[] | undefined {
+  if (result.errorKind === "compile") {
+    return [
+      "Fix the error shown in data.error (in the spec or a file it imports), then cypress_rerun_last",
+    ];
+  }
+
+  if (result.errorKind === "timeout") {
+    return [
+      "Fix the test named in data.runningTest, or raise timeout, then cypress_rerun_last",
+      "cypress_get_last_run",
+    ];
+  }
+
+  return undefined;
 }
 
 function attachFailureScreenshots(

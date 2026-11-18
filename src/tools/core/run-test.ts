@@ -18,14 +18,14 @@ const TOOL = "cypress_run_test";
 export function register(server: McpServer, ctx: ToolContext): void {
   server.tool(
     TOOL,
-    "Run a specific test by name within a spec file using grep (@cypress/grep). Returns structured results with recommended next actions for the agent.",
+    "Run a specific test by name within a spec file using grep (@cypress/grep). Returns structured results with recommended next actions for the agent. If the name matches no test, the call fails and lists the closest test titles.",
     {
       spec: z.string().describe("Path to the spec file"),
       testName: z.string().min(1).describe("Exact or partial test name to match"),
       ...runOptionsSchema,
       ...cloudOptionsSchema,
     },
-    async ({ spec, testName, browser, headed, timeout, env, ...cloud }) => {
+    async ({ spec, testName, browser, headed, timeout, env, ...cloud }, request) => {
       try {
         const resolvedSpec = await ctx.specFinder.resolveSpec(spec);
         const config = await ctx.configLoader.load();
@@ -35,7 +35,10 @@ export function register(server: McpServer, ctx: ToolContext): void {
 
         const args: CypressRunArgs = {
           spec: resolvedSpec,
-          browser: browser ?? config.defaultBrowser,
+          browser:
+            browser === undefined
+              ? config.defaultBrowser
+              : await ctx.processManager.resolveBrowser(browser),
           headed,
           timeout: timeout ?? config.defaultTimeout,
           env,
@@ -50,6 +53,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
           spec: resolvedSpec,
           args,
           testName,
+          request,
         });
       } catch (err) {
         return toolError(TOOL, err);

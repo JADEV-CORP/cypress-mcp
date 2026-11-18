@@ -11,7 +11,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
     TOOL,
     "Replay the exact last run_spec or run_test invocation, including its Cypress Cloud recording options. Removes friction when iterating on the same failure: no need to reconstruct arguments.",
     {},
-    async () => {
+    async (_args, request) => {
       const lastRun = ctx.stateStore.getLastRun();
 
       if (!lastRun) {
@@ -39,6 +39,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
           args: lastRun.args,
           testName: lastRun.args.grep,
           previousRunId: lastRun.runId,
+          request,
         });
       } catch (err) {
         return toolError(TOOL, err);

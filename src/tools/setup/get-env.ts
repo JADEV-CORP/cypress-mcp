@@ -4,12 +4,12 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ToolContext } from "../../types/index.js";
-import { sanitizeEnv } from "../../utils/sanitize.js";
+import { describeEnv } from "../../utils/sanitize.js";
 
 export function register(server: McpServer, ctx: ToolContext): void {
   server.tool(
     "cypress_get_env",
-    "Return the contents of cypress.env.json with sensitive values masked. Safe to display.",
+    "List the keys in cypress.env.json with the type of each value (string, number, boolean, null, array, or a nested object of keys). Values are never returned, so secrets stay out of the conversation.",
     {},
     async () => {
       const config = await ctx.configLoader.load();
@@ -20,7 +20,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
         const parsed: unknown = JSON.parse(raw);
 
         if (typeof parsed === "object" && parsed !== null) {
-          const sanitized = sanitizeEnv(parsed as Record<string, unknown>);
+          const shape = describeEnv(parsed as Record<string, unknown>);
           return {
             content: [
               {
@@ -29,8 +29,8 @@ export function register(server: McpServer, ctx: ToolContext): void {
                   {
                     ok: true,
                     tool: "cypress_get_env",
-                    summary: `Loaded ${Object.keys(sanitized).length} env variables (secrets masked)`,
-                    data: { env: sanitized, path: envPath },
+                    summary: `cypress.env.json has ${Object.keys(shape).length} keys (types only, values are never returned)`,
+                    data: { env: shape, path: envPath },
                     nextActions: ["cypress_doctor", "cypress_run_spec"],
                   },
                   null,

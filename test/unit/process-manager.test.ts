@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { buildChildEnv, buildCliArgs } from "../../src/services/process-manager.js";
+import {
+  buildChildEnv,
+  buildCliArgs,
+  parseCypressInfoBrowsers,
+} from "../../src/services/process-manager.js";
 import type { CypressRunArgs } from "../../src/types/cypress.js";
 
 const base: CypressRunArgs = { spec: "cypress/e2e/login.cy.ts" };
@@ -24,6 +28,22 @@ describe("buildCliArgs", () => {
       "--browser",
       "chrome",
     ]);
+  });
+
+  it("leaves --browser out when no browser was asked for", () => {
+    // Cypress then uses the project's browser setting instead of Electron.
+    expect(buildCliArgs({ ...base, configFile: "cypress.config.ts" })).not.toContain(
+      "--browser",
+    );
+  });
+
+  it("passes the given reporter, json by default", () => {
+    const reporter = "/opt/cypress-mcp/reporter/cypress-mcp-reporter.cjs";
+
+    expect(valueAfter(buildCliArgs(base), "--reporter")).toBe("json");
+    expect(valueAfter(buildCliArgs(base, { expose: true }, reporter), "--reporter")).toBe(
+      reporter,
+    );
   });
 
   it("passes shell metacharacters through as one literal argument", () => {
@@ -110,5 +130,61 @@ describe("buildChildEnv", () => {
     expect(
       buildChildEnv({ CYPRESS_RECORD_KEY: "k" }, recordArgs)["CYPRESS_RECORD_KEY"],
     ).toBe("k");
+  });
+});
+
+describe("parseCypressInfoBrowsers", () => {
+  it("reads names and channels and always allows Electron", () => {
+    // Cypress 16.3 on macOS: Electron is not listed but still runs.
+    const output = [
+      "Displaying Cypress info...",
+      "",
+      "Detected 1 browser installed:",
+      "",
+      "1. Chrome",
+      "  - Name: chrome",
+      "  - Channel: stable",
+      "  - Version: 157.0.8103.79",
+      "  - Executable: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      "",
+      "Note: to run these browsers, pass <name>:<channel> to the '--browser' field",
+      "",
+      "Cypress Version: 16.3.0 (stable)",
+    ].join("\n");
+
+    expect(parseCypressInfoBrowsers(output)).toEqual([
+      "chrome",
+      "chrome:stable",
+      "electron",
+    ]);
+  });
+
+  it("lists every channel of a browser, with Windows line endings", () => {
+    const output = [
+      "1. Chrome",
+      "  - Name: chrome",
+      "  - Channel: stable",
+      "2. Chrome Beta",
+      "  - Name: chrome",
+      "  - Channel: beta",
+      "3. Edge",
+      "  - Name: edge",
+      "  - Channel: stable",
+    ].join("\r\n");
+
+    expect(parseCypressInfoBrowsers(output)).toEqual([
+      "chrome",
+      "chrome:beta",
+      "chrome:stable",
+      "edge",
+      "edge:stable",
+      "electron",
+    ]);
+  });
+
+  it("allows only Electron when no browser is detected", () => {
+    expect(parseCypressInfoBrowsers("Detected no browsers installed")).toEqual([
+      "electron",
+    ]);
   });
 });

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 JADEV GROUP SARL
 // SPDX-License-Identifier: Apache-2.0
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ToolContext } from "./types/index.js";
 import { registerAllTools } from "./tools/index.js";
@@ -11,6 +12,11 @@ const { version } = createRequire(import.meta.url)("../package.json") as {
 };
 
 export const SERVER_VERSION = version;
+
+/** The Mocha reporter passed to `cypress run`; shipped next to dist/ in the package. */
+export const REPORTER_PATH = fileURLToPath(
+  new URL("../reporter/cypress-mcp-reporter.cjs", import.meta.url),
+);
 
 export function createServer(ctx: ToolContext): McpServer {
   const server = new McpServer(

@@ -7,6 +7,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ToolContext } from "../../types/index.js";
 import type { DescribeBlock, SpecAnalysis } from "../../types/results.js";
 import { CypressMcpError } from "../../utils/errors.js";
+import { parseSpec, type ParsedSuite } from "../../services/spec-parser.js";
 
 export function register(server: McpServer, ctx: ToolContext): void {
   server.tool(
@@ -51,11 +52,9 @@ export function register(server: McpServer, ctx: ToolContext): void {
 }
 
 function analyzeSpec(file: string, content: string): SpecAnalysis {
-  const lines = content.split("\n");
-
   return {
     file,
-    structure: { describes: extractDescribeBlocks(lines) },
+    structure: { describes: toDescribeBlocks(parseSpec(content).root) },
     visits: extractPatterns(content, /cy\.visit\s*\(\s*['"`](.+?)['"`]/g),
     intercepts: extractInterceptPatterns(content),
     fixtures: extractPatterns(content, /cy\.fixture\s*\(\s*['"`](.+?)['"`]/g),
@@ -63,50 +62,28 @@ function analyzeSpec(file: string, content: string): SpecAnalysis {
   };
 }
 
-function extractDescribeBlocks(lines: string[]): DescribeBlock[] {
-  const blocks: DescribeBlock[] = [];
-  const describeRegex = /describe\s*\(\s*['"`](.+?)['"`]/;
-  const itRegex = /it(?:\.only|\.skip)?\s*\(\s*['"`](.+?)['"`]/;
-  const hookRegex = /\b(before|beforeEach|after|afterEach)\s*\(/;
-
-  let currentDescribe: DescribeBlock | null = null;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!;
-    const descMatch = describeRegex.exec(line);
-    const itMatch = itRegex.exec(line);
-    const hookMatch = hookRegex.exec(line);
-
-    if (descMatch?.[1]) {
-      currentDescribe = {
-        name: descMatch[1],
-        tests: [],
-        hooks: [],
-        nested: [],
-      };
-      blocks.push(currentDescribe);
-    } else if (itMatch?.[1] && currentDescribe) {
-      (currentDescribe.tests as { name: string; line: number }[]).push({
-        name: itMatch[1],
-        line: i + 1,
-      });
-    } else if (itMatch?.[1] && !currentDescribe) {
-      if (blocks.length === 0) {
-        currentDescribe = { name: "(root)", tests: [], hooks: [], nested: [] };
-        blocks.push(currentDescribe);
-      }
-      (blocks[0]!.tests as { name: string; line: number }[]).push({
-        name: itMatch[1],
-        line: i + 1,
-      });
-    } else if (hookMatch?.[1] && currentDescribe) {
-      if (!(currentDescribe.hooks as string[]).includes(hookMatch[1])) {
-        (currentDescribe.hooks as string[]).push(hookMatch[1]);
-      }
-    }
+/** Top-level suites, preceded by a "(root)" block for tests and hooks outside any describe. */
+function toDescribeBlocks(root: ParsedSuite): DescribeBlock[] {
+  const blocks = root.suites.map(toDescribeBlock);
+  if (root.tests.length > 0 || root.hooks.length > 0) {
+    blocks.unshift({ ...toDescribeBlock(root), name: "(root)", nested: [] });
   }
-
   return blocks;
+}
+
+function toDescribeBlock(suite: ParsedSuite): DescribeBlock {
+  return {
+    name: suite.name,
+    ...(suite.line > 0 ? { line: suite.line } : {}),
+    ...(suite.mode ? { mode: suite.mode } : {}),
+    tests: suite.tests.map((test) => ({
+      name: test.name,
+      line: test.line,
+      ...(test.mode ? { mode: test.mode } : {}),
+    })),
+    hooks: [...suite.hooks],
+    nested: suite.suites.map(toDescribeBlock),
+  };
 }
 
 function extractPatterns(content: string, regex: RegExp): string[] {

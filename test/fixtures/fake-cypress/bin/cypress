@@ -1,0 +1,129 @@
+#!/usr/bin/env node
+// Stand-in for the Cypress CLI in integration tests. cypress-mcp runs it the
+// way it runs the real one (node <cli> run ...). It logs its arguments to
+// FAKE_CYPRESS_LOG, prints the reporter's event lines and a Mocha JSON report
+// like a real run, and behaves according to the spec it is given.
+"use strict";
+
+const fs = require("node:fs");
+const path = require("node:path");
+const { spawn } = require("node:child_process");
+
+const MARKER = "@@cypress-mcp@@";
+const args = process.argv.slice(2);
+
+if (process.env.FAKE_CYPRESS_LOG) {
+  fs.appendFileSync(process.env.FAKE_CYPRESS_LOG, `${JSON.stringify(args)}\n`);
+}
+
+if (args[0] === "info") {
+  process.stdout.write(
+    [
+      "Displaying Cypress info...",
+      "",
+      "Detected 2 browsers installed:",
+      "",
+      "1. Chrome",
+      "  - Name: chrome",
+      "  - Channel: stable",
+      "  - Version: 150.0.0.0",
+      "  - Executable: /opt/google/chrome/chrome",
+      "",
+      "2. Firefox Developer Edition",
+      "  - Name: firefox",
+      "  - Channel: dev",
+      "  - Version: 140.0b1",
+      "  - Executable: /opt/firefox-dev/firefox",
+      "",
+      "Cypress Version: 16.3.0 (stable)",
+      "",
+    ].join("\n"),
+  );
+  process.exit(0);
+}
+
+const valueAfter = (flag) => {
+  const index = args.indexOf(flag);
+  return index === -1 ? undefined : args[index + 1];
+};
+const spec = valueAfter("--spec") ?? "";
+const grep = valueAfter("--expose") ? JSON.parse(valueAfter("--expose")).grep : undefined;
+const emit = (event) => process.stdout.write(`${MARKER}${JSON.stringify(event)}\n`);
+
+/** Tests of each spec: [suite, title, error or null, stack]. */
+const SPECS = {
+  "pass.cy.js": [["Shop basics", "shows the title", null]],
+  "checkout.cy.js": [
+    [
+      "Checkout",
+      "adds one item to the cart",
+      "Timed out retrying after 2000ms: expected '<span>' to have text '1', but the text was '2'",
+      "AssertionError: Timed out retrying\n    at Context.eval (webpack://shop/./cypress/e2e/checkout.cy.js:5:37)",
+    ],
+    [
+      "Checkout",
+      "logs in with valid credentials",
+      'Timed out retrying after 2000ms: Expected to find element: `[data-cy="login-button"]`, but never found it.',
+      "AssertionError: Timed out retrying\n    at Context.eval (webpack://shop/./cypress/e2e/checkout.cy.js:10:7)",
+    ],
+    ["Checkout", "shows the cart page", null],
+  ],
+};
+
+const name = path.basename(spec);
+
+if (name === "hang.cy.js") {
+  // Like the Cypress binary, a child that keeps running if only this
+  // process is killed.
+  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+    stdio: "ignore",
+  });
+  fs.writeFileSync(process.env.FAKE_CYPRESS_PIDS, JSON.stringify([process.pid, child.pid]));
+  emit({ event: "start", total: 2 });
+  emit({ event: "test", title: "finishes", fullTitle: "Hang finishes" });
+  emit({ event: "pass", title: "finishes", fullTitle: "Hang finishes", duration: 5 });
+  emit({ event: "test", title: "never ends", fullTitle: "Hang never ends" });
+  setInterval(() => {}, 1000);
+  return;
+}
+
+const tests = (SPECS[name] ?? SPECS["pass.cy.js"]).map(([suite, title, error, stack]) => {
+  const fullTitle = `${suite} ${title}`;
+  // Like @cypress/grep without grepOmitFiltered: filtered tests are pending.
+  const state = grep && !fullTitle.includes(grep) ? "pending" : error ? "failed" : "passed";
+  return { title, fullTitle, state, err: error ? { message: error, stack } : {} };
+});
+
+console.log("  Running:  " + name + " (1 of 1)");
+emit({ event: "start", total: tests.length });
+for (const test of tests) {
+  emit({ event: "test", title: test.title, fullTitle: test.fullTitle });
+  const event = { passed: "pass", failed: "fail", pending: "pending" }[test.state];
+  emit({ event, title: test.title, fullTitle: test.fullTitle, error: test.err.message });
+}
+
+const clean = (test) => ({
+  title: test.title,
+  fullTitle: test.fullTitle,
+  duration: 10,
+  currentRetry: 0,
+  err: test.err,
+});
+const by = (state) => tests.filter((test) => test.state === state).map(clean);
+const report = {
+  stats: {
+    suites: 1,
+    tests: tests.length,
+    passes: by("passed").length,
+    pending: by("pending").length,
+    failures: by("failed").length,
+    duration: 30,
+  },
+  tests: tests.map(clean),
+  pending: by("pending"),
+  failures: by("failed"),
+  passes: by("passed"),
+};
+process.stdout.write(JSON.stringify(report, null, 2));
+console.log("\n  (Run Finished)");
+process.exitCode = report.stats.failures;

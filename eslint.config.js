@@ -7,7 +7,8 @@ export default [
     ignores: ["dist/", "node_modules/", "*.mjs", "test/fixtures/"],
   },
   {
-    files: ["src/**/*.ts", "test/**/*.ts"],
+    // The reporter is plain CommonJS because Cypress require()s it.
+    files: ["src/**/*.ts", "test/**/*.ts", "reporter/**/*.cjs"],
     languageOptions: {
       parser: tsparser,
       parserOptions: {

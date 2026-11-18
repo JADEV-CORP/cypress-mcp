@@ -68,11 +68,13 @@ Dependabot opens grouped dependency PRs every Monday. Production dependency bump
 
 ## Releasing
 
-1. Bump `version` in `package.json` and add a `CHANGELOG.md` entry
+1. Bump `version` in `package.json` and both `version` fields in `server.json`, and add a `CHANGELOG.md` entry (a unit test fails when the two files disagree)
 2. Merge to `main`, then push a matching tag: `git tag v0.3.0 && git push origin v0.3.0`
-3. The release workflow checks the tag matches the version, runs the full check, publishes to npm with provenance and creates the GitHub release
+3. The release workflow checks the tag matches the versions, runs the full check, publishes to npm with provenance, creates the GitHub release, then publishes `server.json` to the official MCP Registry
 
 Publishing uses npm trusted publishing (OIDC), so there is no npm token secret. The package's trusted publisher on npmjs.com must point at this repository and `release.yml`. If a version is already on npm, the workflow skips the publish and still creates the GitHub release.
+
+The MCP Registry job logs in with the workflow's GitHub OIDC token, which covers the `io.github.jams4code` namespace, so it needs no secret either. The registry checks that the npm package's `mcpName` matches `server.json`, which is why it runs after the npm publish. It skips versions already in the registry. `mcp-publisher` is pinned in `release.yml` and verified against its Sigstore bundle before it runs.
 
 ## License
 

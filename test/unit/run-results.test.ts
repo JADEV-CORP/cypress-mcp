@@ -91,4 +91,32 @@ describe("run-results helpers", () => {
   it("should not mention Cloud MCP for local runs", () => {
     expect(buildRunNextActions(baseResult).join(" ")).not.toContain("Cloud");
   });
+
+  it("should send compile errors to the spec, not the doctor", () => {
+    const compiled = {
+      ...baseResult,
+      failures: [],
+      error: "Module not found",
+      errorKind: "compile" as const,
+    };
+
+    expect(buildRunSummary(compiled, "e2e/a.cy.ts")).toContain("did not compile");
+    expect(buildRunNextActions(compiled).join(" ")).not.toContain("cypress_doctor");
+    expect(buildRunNextActions(compiled)[0]).toContain("cypress_rerun_last");
+  });
+
+  it("should name the test that hung in a timeout summary", () => {
+    const timedOut = {
+      ...baseResult,
+      error: "Cypress process timed out after 2000ms",
+      errorKind: "timeout" as const,
+      runningTest: "Hang never ends",
+      stats: { ...baseResult.stats, passing: 1, failing: 0 },
+    };
+
+    expect(buildRunSummary(timedOut, "e2e/hang.cy.ts")).toBe(
+      'Run timed out while running "Hang never ends" in e2e/hang.cy.ts after 1 passing, 0 failing',
+    );
+    expect(buildRunNextActions(timedOut)[0]).toContain("data.runningTest");
+  });
 });

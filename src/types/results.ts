@@ -9,6 +9,13 @@ export interface CypressRunResult {
   readonly screenshots: readonly string[];
   readonly videos: readonly string[];
   readonly error?: string;
+  /**
+   * Why the run produced no complete report: the spec did not compile, or the
+   * run was killed at its timeout. Absent for other crashes.
+   */
+  readonly errorKind?: "compile" | "timeout";
+  /** Full title of the test that was running when the run timed out */
+  readonly runningTest?: string;
   readonly stdoutTail?: string;
   readonly stderrTail?: string;
   /** Present when the run was recorded to Cypress Cloud */
@@ -95,7 +102,15 @@ export interface SpecAnalysis {
 
 export interface DescribeBlock {
   readonly name: string;
-  readonly tests: readonly { readonly name: string; readonly line: number }[];
+  /** 1-based line of the describe() call; absent for the "(root)" block */
+  readonly line?: number;
+  /** Set for describe.only / describe.skip (and xdescribe) */
+  readonly mode?: "only" | "skip";
+  readonly tests: readonly {
+    readonly name: string;
+    readonly line: number;
+    readonly mode?: "only" | "skip";
+  }[];
   readonly hooks: readonly string[];
   readonly nested: readonly DescribeBlock[];
 }

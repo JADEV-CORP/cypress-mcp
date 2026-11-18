@@ -1,7 +1,8 @@
 {
   "name": "cypress-mcp",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "MCP server for AI-driven Cypress test execution. Run, debug, and iterate on E2E tests from your AI agent, with Cypress Cloud recording and flaky test detection.",
+  "mcpName": "io.github.jams4code/cypress-mcp",
   "type": "module",
   "bin": {
     "cypress-mcp": "bin/cypress-mcp.mjs"
@@ -10,7 +11,10 @@
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
+    "!dist/*.map",
     "bin",
+    "reporter",
+    "skill",
     "LICENSE",
     "NOTICE",
     "README.md"
@@ -19,10 +23,10 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
-    "lint": "eslint src/ test/",
-    "lint:fix": "eslint src/ test/ --fix",
-    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
-    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",
+    "lint": "eslint src/ test/ reporter/",
+    "lint:fix": "eslint src/ test/ reporter/ --fix",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" \"reporter/**/*.cjs\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\" \"reporter/**/*.cjs\"",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

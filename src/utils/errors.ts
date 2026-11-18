@@ -1,5 +1,7 @@
 // Copyright (c) 2026 JADEV GROUP SARL
 // SPDX-License-Identifier: Apache-2.0
+import type { CompletedTest } from "../services/reporter-events.js";
+
 export class CypressMcpError extends Error {
   constructor(
     message: string,
@@ -59,14 +61,51 @@ export class SpecNotFoundError extends CypressMcpError {
   }
 }
 
+/** What a run had done when it was stopped. */
+export interface PartialRun {
+  /** Full title of the test that had started and not finished */
+  readonly runningTest?: string;
+  readonly completed: readonly CompletedTest[];
+  readonly stdout: string;
+  readonly stderr: string;
+}
+
 export class TimeoutError extends CypressMcpError {
-  constructor(timeout: number) {
+  constructor(
+    timeout: number,
+    /** Present when the run had started, so its partial output is kept */
+    public readonly partial?: PartialRun,
+  ) {
     super(
-      `Cypress process timed out after ${timeout}ms`,
+      partial?.runningTest
+        ? `Cypress process timed out after ${timeout}ms while running "${partial.runningTest}"`
+        : `Cypress process timed out after ${timeout}ms`,
       "TIMEOUT",
       "Increase the timeout or check if the test is stuck.",
     );
     this.name = "TimeoutError";
+  }
+}
+
+export class RunCancelledError extends CypressMcpError {
+  constructor() {
+    super(
+      "The run was cancelled by the client and Cypress was stopped.",
+      "CANCELLED",
+      "Start the run again when needed.",
+    );
+    this.name = "RunCancelledError";
+  }
+}
+
+export class BrowserCheckError extends CypressMcpError {
+  constructor(detail: string) {
+    super(
+      `Could not list the browsers Cypress can use (cypress info failed): ${detail}`,
+      "BROWSER_CHECK_FAILED",
+      "Omit browser to use the project's default browser, or run cypress_doctor.",
+    );
+    this.name = "BrowserCheckError";
   }
 }
 

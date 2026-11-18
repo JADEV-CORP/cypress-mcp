@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.2.2 (unreleased)
+
+Fixes for problems agents hit in 0.2.1, and setup docs for every major MCP client.
+
+### Fixes
+
+- `cypress_run_test` no longer reports a pass when the name matches no test. With a title filter and nothing passed or failed, the call fails with code `NO_TEST_MATCHED`, the spec's test titles and the closest matches.
+- Cancelling a run now stops it. The request's cancellation kills the whole Cypress process tree (CLI, binary, browser), a run cancelled while queued never starts, and the next run no longer waits behind the cancelled one.
+- Runs send a progress notification per test when the client asks for progress.
+- A run that hits its timeout keeps what it did: the tests that finished, their failures and the test that was running (`runningTest`) are returned and recorded as the last run.
+- `cypress_get_failure_context` marks the line from the error's stack (`location: "cypress/e2e/checkout.cy.js:10:7"`), and every failure gets a spec excerpt. Before, a keyword search could mark the wrong line or find none.
+- A spec that does not compile reports the cause (`Module not found: Error: Can't resolve './x'`, syntax and TypeScript errors) in `error`, with `errorKind: "compile"`, and points the agent at the spec instead of `cypress_doctor`.
+- `cypress_discover`, `cypress_analyze_spec` and `cypress_list_specs` share one parser and agree on test counts. `cy.visit("...")` is no longer counted as a test, `beforeEach` hooks are no longer lost, nested `describe` blocks are reported as nested, and `.only` / `.skip`, `context`, `specify` and template literal titles are handled.
+- `--browser electron` is no longer forced on every run. Without a `browser` argument (or `defaultBrowser` in `cypress-mcp.config.json`) Cypress uses the project's own choice.
+- Config changes apply without a restart. The config is reloaded when `cypress.config.*`, a file it imports, the support file or `cypress-mcp.config.json` changes, appears or disappears. Projects that rely on Cypress's default support file now get `@cypress/grep` detected there too.
+- `--cwd=<dir>` is accepted as well as `--cwd <dir>`.
+- Error results suggest a next step that fits the error instead of always `cypress_doctor`.
+
+### Security
+
+- `cypress_get_env` returns the keys of `cypress.env.json` and the type of each value, never the values. 0.2.1 returned values in clear unless the key name looked sensitive, and kept 4 characters of the ones it masked.
+- `browser` accepts only names that `cypress info` lists (plus `electron`), such as `chrome` or `chrome:beta`. Cypress also accepts a path for `--browser` and runs that file, so an agent could run any executable.
+
+### Package
+
+- Runs use `reporter/cypress-mcp-reporter.cjs`, shipped in the package, instead of `--reporter json`. It prints the same JSON report plus one event line per test.
+- The `skill/` folder ships in the npm package. The source map no longer does: the tarball is 37.7 kB instead of 62.5 kB.
+- `mcpName` in `package.json` and a `server.json` for the official MCP Registry. The release workflow publishes to the registry after npm, with GitHub OIDC, and its actions are pinned to commit SHAs.
+
+### Docs
+
+- README: setup for Claude Code, Claude Desktop, Codex CLI, VS Code, the Copilot cloud agent, Cursor, Windsurf, Gemini CLI, Zed, JetBrains AI Assistant and Junie, with timeout guidance.
+- README: a note on two unrelated projects that document this package name.
+- Supported Cypress versions now match what CI tests: 14 to 16. PRODUCT.md describes the current project.
+
 ## 0.2.1 (2026-11-17)
 
 First npm release since 0.1.1. The 0.2.0 tag never reached npm, so this version also ships everything listed under 0.2.0.

@@ -8,7 +8,10 @@ import type {
   TestResult,
   TestState,
 } from "../types/results.js";
-import { extractDiagnosticSnippet } from "../utils/cypress-diagnostics.js";
+import {
+  extractCompileError,
+  extractDiagnosticSnippet,
+} from "../utils/cypress-diagnostics.js";
 import type { Logger } from "../utils/logger.js";
 
 const ANSI_PATTERN = /\u001b\[[0-9;]*[A-Za-z]/g;
@@ -182,28 +185,51 @@ export class OutputParser {
     stderr: string,
     exitCode: number | null,
   ): CypressRunResult {
+    const stdoutTail = stdout.trim().slice(-2000) || undefined;
+    const stderrTail = stderr.trim().slice(-2000) || undefined;
+
+    // The cause of a compile error sits above the results table and is lost
+    // from the tails, so it is lifted into `error`.
+    const compileError = extractCompileError(stdout, stderr);
+    if (compileError) {
+      return {
+        ...emptyResult(),
+        error: compileError,
+        errorKind: "compile",
+        stdoutTail,
+        stderrTail,
+      };
+    }
+
     const diagnostic = extractDiagnosticSnippet(stdout, stderr);
 
     return {
-      success: false,
-      stats: {
-        tests: 0,
-        passing: 0,
-        failing: 0,
-        pending: 0,
-        skipped: 0,
-        flaky: 0,
-        duration: 0,
-      },
-      tests: [],
-      failures: [],
-      screenshots: [],
-      videos: [],
+      ...emptyResult(),
       error: `Cypress process exited with code ${exitCode ?? "unknown"}. Output: ${diagnostic}`,
-      stdoutTail: stdout.trim().slice(-2000) || undefined,
-      stderrTail: stderr.trim().slice(-2000) || undefined,
+      stdoutTail,
+      stderrTail,
     };
   }
+}
+
+/** A result with no tests, for runs that never produced a report. */
+export function emptyResult(): CypressRunResult {
+  return {
+    success: false,
+    stats: {
+      tests: 0,
+      passing: 0,
+      failing: 0,
+      pending: 0,
+      skipped: 0,
+      flaky: 0,
+      duration: 0,
+    },
+    tests: [],
+    failures: [],
+    screenshots: [],
+    videos: [],
+  };
 }
 
 /** Find the Cypress Cloud run URL that `cypress run --record` prints. Exported for tests. */

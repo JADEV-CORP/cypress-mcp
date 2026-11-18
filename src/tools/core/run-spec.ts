@@ -23,14 +23,17 @@ export function register(server: McpServer, ctx: ToolContext): void {
       ...runOptionsSchema,
       ...cloudOptionsSchema,
     },
-    async ({ spec, browser, headed, timeout, env, ...cloud }) => {
+    async ({ spec, browser, headed, timeout, env, ...cloud }, request) => {
       try {
         const resolvedSpec = await ctx.specFinder.resolveSpec(spec);
         const config = await ctx.configLoader.load();
 
         const args: CypressRunArgs = {
           spec: resolvedSpec,
-          browser: browser ?? config.defaultBrowser,
+          browser:
+            browser === undefined
+              ? config.defaultBrowser
+              : await ctx.processManager.resolveBrowser(browser),
           headed,
           timeout: timeout ?? config.defaultTimeout,
           env,
@@ -44,6 +47,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
           spec: resolvedSpec,
           args,
           includeDiscoverOnSuccess: true,
+          request,
         });
       } catch (err) {
         return toolError(TOOL, err);

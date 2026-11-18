@@ -5,11 +5,14 @@ import fs from "node:fs/promises";
 import treeKill from "tree-kill";
 import type { CypressRunArgs } from "../types/cypress.js";
 import {
+  BrowserCheckError,
   CypressNotFoundError,
   InvalidArgumentError,
   RecordKeyMissingError,
+  RunCancelledError,
   TimeoutError,
 } from "../utils/errors.js";
+import { ReporterEventStream, type RunProgress } from "./reporter-events.js";
 import {
   isVersionAtLeast,
   resolveCypressInstall,
@@ -29,22 +32,47 @@ export interface CliCapabilities {
   readonly expose: boolean;
 }
 
+export interface RunOptions {
+  /** Aborts the run: queued runs never start, a running Cypress is killed */
+  readonly signal?: AbortSignal;
+  /** Called when Cypress starts the spec and after each test */
+  readonly onProgress?: (progress: RunProgress) => void;
+}
+
+/** Grace period between SIGTERM and SIGKILL when stopping Cypress. */
+const FORCE_KILL_AFTER_MS = 5_000;
+const CYPRESS_INFO_TIMEOUT_MS = 60_000;
+
+/** A browser name, optionally with a channel: chrome, chrome:beta, firefox:dev. */
+const BROWSER_NAME_PATTERN = /^[a-z][a-z0-9-]*(?::[a-z0-9-]+)?$/;
+
 export class ProcessManager {
   private runQueue: Promise<void> = Promise.resolve();
   private activeProcess: ChildProcess | null = null;
+  private browsers: { cli: string; names: Promise<readonly string[]> } | null = null;
 
   constructor(
     private readonly projectRoot: string,
     private readonly logger: Logger,
+    /** Absolute path of reporter/cypress-mcp-reporter.cjs; "json" for no progress */
+    private readonly reporter = "json",
   ) {}
 
-  async run(args: CypressRunArgs): Promise<SpawnResult> {
-    // Serial execution: queue behind any active run
-    return new Promise<SpawnResult>((resolve, reject) => {
-      this.runQueue = this.runQueue
-        .then(() => this.executeRun(args))
-        .then(resolve, reject);
+  /** Run Cypress after any run already in progress (one Cypress at a time). */
+  run(args: CypressRunArgs, options: RunOptions = {}): Promise<SpawnResult> {
+    const job = this.runQueue.then(() => {
+      // Cancelled while waiting in the queue: never start Cypress.
+      if (options.signal?.aborted) {
+        throw new RunCancelledError();
+      }
+      return this.executeRun(args, options);
     });
+    // The next run waits for this one to end, whatever its outcome.
+    this.runQueue = job.then(
+      () => undefined,
+      () => undefined,
+    );
+    return job;
   }
 
   /** Kill the active Cypress process tree, if any. Resolves once the signal is sent. */
@@ -81,11 +109,100 @@ export class ProcessManager {
     throw new CypressNotFoundError(this.projectRoot);
   }
 
-  private async executeRun(args: CypressRunArgs): Promise<SpawnResult> {
+  /**
+   * Check a browser name from a tool call against the browsers this Cypress
+   * install can launch, and return it in canonical form. Cypress also accepts
+   * a path to an executable for --browser and runs it to detect its version,
+   * so anything that is not a listed name is rejected before Cypress sees it.
+   */
+  async resolveBrowser(requested: string): Promise<string> {
+    const name = requested.trim().toLowerCase();
+    if (!BROWSER_NAME_PATTERN.test(name)) {
+      throw new InvalidArgumentError(
+        `browser must be a browser name such as chrome, firefox, edge or electron. Paths are not accepted: ${requested}`,
+      );
+    }
+
+    let available: readonly string[];
+    try {
+      available = await this.availableBrowsers();
+    } catch (err) {
+      if (err instanceof CypressNotFoundError) {
+        throw err;
+      }
+      throw new BrowserCheckError(err instanceof Error ? err.message : String(err));
+    }
+
+    if (!available.includes(name)) {
+      throw new InvalidArgumentError(
+        `Browser "${requested}" is not available. Cypress can use: ${available.join(", ")}.`,
+      );
+    }
+    return name;
+  }
+
+  /** Browser names from `cypress info`, cached per Cypress install. */
+  private async availableBrowsers(): Promise<readonly string[]> {
     const install = await this.resolveInstall();
-    const cliArgs = buildCliArgs(args, {
-      expose: isVersionAtLeast(install.version, 15, 10),
+    if (this.browsers?.cli !== install.cli) {
+      const names = this.runCypressInfo(install.cli).then(parseCypressInfoBrowsers);
+      this.browsers = { cli: install.cli, names };
+      // A failed lookup is not cached, so the next call tries again.
+      names.catch(() => {
+        if (this.browsers?.names === names) {
+          this.browsers = null;
+        }
+      });
+    }
+    return this.browsers.names;
+  }
+
+  private runCypressInfo(cli: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [cli, "info"], {
+        cwd: this.projectRoot,
+        shell: false,
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: process.env,
+      });
+      const chunks: Buffer[] = [];
+      child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+      child.stderr.on("data", (chunk: Buffer) => chunks.push(chunk));
+
+      const timer = setTimeout(() => {
+        if (child.pid) treeKill(child.pid, "SIGKILL");
+        reject(new Error(`no answer after ${CYPRESS_INFO_TIMEOUT_MS}ms`));
+      }, CYPRESS_INFO_TIMEOUT_MS);
+
+      child.on("error", (err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+      child.on("close", (exitCode) => {
+        clearTimeout(timer);
+        const output = Buffer.concat(chunks).toString("utf-8");
+        if (exitCode === 0) {
+          resolve(output);
+        } else {
+          reject(
+            new Error(`exit code ${exitCode ?? "unknown"}: ${output.trim().slice(-500)}`),
+          );
+        }
+      });
     });
+  }
+
+  private async executeRun(
+    args: CypressRunArgs,
+    options: RunOptions,
+  ): Promise<SpawnResult> {
+    const install = await this.resolveInstall();
+    const cliArgs = buildCliArgs(
+      args,
+      { expose: isVersionAtLeast(install.version, 15, 10) },
+      this.reporter,
+    );
     const env = buildChildEnv(process.env, args);
     const timeout = args.timeout ?? 300_000;
 
@@ -97,7 +214,7 @@ export class ProcessManager {
       timeout,
     });
 
-    return this.spawnProcess(install.cli, cliArgs, env, timeout);
+    return this.spawnProcess(install.cli, cliArgs, env, timeout, options);
   }
 
   private spawnProcess(
@@ -105,9 +222,18 @@ export class ProcessManager {
     args: readonly string[],
     env: NodeJS.ProcessEnv,
     timeout: number,
+    options: RunOptions,
   ): Promise<SpawnResult> {
     return new Promise<SpawnResult>((resolve, reject) => {
+      const { signal } = options;
+      if (signal?.aborted) {
+        reject(new RunCancelledError());
+        return;
+      }
+
       let timedOut = false;
+      let cancelled = false;
+      let killing = false;
       let forceKillTimer: NodeJS.Timeout | null = null;
       let settled = false;
 
@@ -122,11 +248,40 @@ export class ProcessManager {
       });
 
       this.activeProcess = child;
-      const stdoutChunks: Buffer[] = [];
+      const events = new ReporterEventStream(options.onProgress);
       const stderrChunks: Buffer[] = [];
 
-      child.stdout.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
+      // Decoded as UTF-8 by the stream, so characters split across chunks survive.
+      child.stdout.setEncoding("utf-8");
+      child.stdout.on("data", (chunk: string) => events.push(chunk));
       child.stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+
+      // Kill the whole tree: the CLI starts the Cypress binary, which starts
+      // the browser and its helpers. Killing only the CLI leaves them running
+      // and the next run waits behind them.
+      const killTree = (): void => {
+        const pid = child.pid;
+        if (!pid || killing) {
+          return;
+        }
+        killing = true;
+        treeKill(pid, "SIGTERM", () => {
+          forceKillTimer = setTimeout(() => {
+            if (child.exitCode === null && child.signalCode === null) {
+              treeKill(pid, "SIGKILL");
+            }
+          }, FORCE_KILL_AFTER_MS);
+        });
+      };
+
+      const onAbort = (): void => {
+        cancelled = true;
+        this.logger.info("Run cancelled by the client, killing Cypress", {
+          pid: child.pid,
+        });
+        killTree();
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
 
       const finish = (callback: () => void): void => {
         if (settled) {
@@ -135,6 +290,7 @@ export class ProcessManager {
 
         settled = true;
         clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
         if (forceKillTimer) {
           clearTimeout(forceKillTimer);
         }
@@ -152,43 +308,64 @@ export class ProcessManager {
         this.logger.warn("Cypress process timed out, killing", {
           pid: child.pid,
           timeout,
+          runningTest: events.runningTest,
         });
-        treeKill(child.pid, "SIGTERM", () => {
-          // If still alive after 5s, force kill
-          forceKillTimer = setTimeout(() => {
-            if (child.pid && child.exitCode === null) {
-              treeKill(child.pid, "SIGKILL");
-            }
-          }, 5000);
-        });
+        killTree();
       }, timeout);
 
-      child.on("close", (exitCode) => {
-        finish(() => {
-          if (timedOut) {
-            reject(new TimeoutError(timeout));
-            return;
-          }
+      const settle = (exitCode: number | null, error?: Error): void => {
+        const stdout = events.end();
+        const stderr = Buffer.concat(stderrChunks).toString("utf-8");
 
-          resolve({
-            stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
-            stderr: Buffer.concat(stderrChunks).toString("utf-8"),
-            exitCode,
-          });
-        });
-      });
+        if (cancelled) {
+          reject(new RunCancelledError());
+        } else if (timedOut) {
+          reject(
+            new TimeoutError(timeout, {
+              runningTest: events.runningTest,
+              completed: events.completed,
+              stdout,
+              stderr,
+            }),
+          );
+        } else if (error) {
+          reject(error);
+        } else {
+          resolve({ stdout, stderr, exitCode });
+        }
+      };
 
-      child.on("error", (err) => {
-        finish(() => {
-          if (timedOut) {
-            reject(new TimeoutError(timeout));
-            return;
-          }
-          reject(err);
-        });
-      });
+      child.on("close", (exitCode) => finish(() => settle(exitCode)));
+      child.on("error", (err) => finish(() => settle(null, err)));
     });
   }
+}
+
+/**
+ * Browser names `cypress run --browser` accepts on this machine, from the
+ * output of `cypress info`: each detected browser by name and as
+ * `name:channel`. Electron is always included: it ships inside the Cypress
+ * binary, and Cypress 16 no longer lists it although it still runs it.
+ * Exported for tests.
+ */
+export function parseCypressInfoBrowsers(output: string): string[] {
+  const names = new Set<string>(["electron"]);
+  let current: string | undefined;
+
+  for (const line of output.split(/\r?\n/)) {
+    const name = /^\s*-\s*Name:\s*(\S+)/.exec(line)?.[1];
+    if (name) {
+      current = name.toLowerCase();
+      names.add(current);
+      continue;
+    }
+    const channel = /^\s*-\s*Channel:\s*(\S+)/.exec(line)?.[1];
+    if (channel && current) {
+      names.add(`${current}:${channel.toLowerCase()}`);
+    }
+  }
+
+  return [...names].sort();
 }
 
 /**
@@ -199,13 +376,16 @@ export class ProcessManager {
 export function buildCliArgs(
   args: CypressRunArgs,
   capabilities: CliCapabilities = { expose: true },
+  reporter = "json",
 ): string[] {
-  const cliArgs = ["run", "--reporter", "json", "--spec", args.spec];
+  const cliArgs = ["run", "--reporter", reporter, "--spec", args.spec];
 
   if (args.configFile) {
     cliArgs.push("--config-file", args.configFile);
   }
 
+  // Only when asked for: without --browser Cypress uses the project's own
+  // browser setting, then its default.
   if (args.browser) {
     cliArgs.push("--browser", args.browser);
   }

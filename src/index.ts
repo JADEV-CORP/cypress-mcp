@@ -1,8 +1,7 @@
 // Copyright (c) 2026 JADEV GROUP SARL
 // SPDX-License-Identifier: Apache-2.0
-import path from "node:path";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { createServer } from "./server.js";
+import { createServer, REPORTER_PATH } from "./server.js";
 import { ConfigLoader } from "./services/config-loader.js";
 import { ProcessManager } from "./services/process-manager.js";
 import { OutputParser } from "./services/output-parser.js";
@@ -11,10 +10,11 @@ import { ScreenshotResolver } from "./services/screenshot-resolver.js";
 import { StateStore } from "./services/state-store.js";
 import { DEFAULT_CONFIG } from "./types/config.js";
 import { createLogger } from "./utils/logger.js";
+import { resolveProjectRoot } from "./utils/paths.js";
 import type { ToolContext } from "./types/index.js";
 
 export async function main(argv: string[]): Promise<void> {
-  const cwd = parseCwd(argv);
+  const cwd = resolveProjectRoot(argv, process.env, process.cwd());
   const verbose = argv.includes("--verbose") || argv.includes("-v");
   const logger = createLogger(verbose);
 
@@ -33,7 +33,7 @@ export async function main(argv: string[]): Promise<void> {
   }
 
   const ctx: ToolContext = {
-    processManager: new ProcessManager(cwd, logger),
+    processManager: new ProcessManager(cwd, logger, REPORTER_PATH),
     outputParser: new OutputParser(logger),
     configLoader,
     specFinder: new SpecFinder(cwd, logger),
@@ -75,12 +75,6 @@ export async function main(argv: string[]): Promise<void> {
 
   await server.connect(transport);
   logger.info("Server connected, waiting for requests");
-}
-
-function parseCwd(argv: string[]): string {
-  const cwdIndex = argv.indexOf("--cwd");
-  const cwdValue = cwdIndex !== -1 ? argv[cwdIndex + 1] : undefined;
-  return path.resolve(cwdValue ?? process.cwd());
 }
 
 // Auto-start when run directly
