@@ -47,7 +47,7 @@
     "cypress-cloud",
     "flaky-tests"
   ],
-  "author": "JADEV GROUP SARL <info@jadev-group.com> (https://jadev-group.com)",
+  "author": "JADEV GROUP SARL (https://www.jadev-corp.com)",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",

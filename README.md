@@ -413,17 +413,7 @@ The output is the same text as `cypress_run`. Exit code 0 when every test passed
 
 ## How It Works
 
-```mermaid
-graph LR
-    A[AI Agent] -->|stdio JSON-RPC| B[cypress-mcp]
-    B -->|node cypress/bin/cypress run| C[Cypress]
-    C -->|reporter events and report| B
-    B -->|compact text + structuredContent| A
-
-    style A fill:#1a1a2e,stroke:#e94560,color:#fff
-    style B fill:#16213e,stroke:#0f3460,color:#fff
-    style C fill:#0f3460,stroke:#533483,color:#fff
-```
+<p align="center"><img src="https://raw.githubusercontent.com/jams4code/cypress-mcp/main/docs/images/how-it-works.png" alt="The agent calls cypress-mcp over MCP stdio; cypress-mcp runs Cypress with a wrapper config in a per-run folder and returns the failure with file:line, error, page and screenshot" width="860"></p>
 
 - **Protocol**: stdio, built on the MCP TypeScript SDK v2. It serves 2025 clients (the `initialize` handshake) and 2026-07-28 clients (per-request metadata, `server/discover`) from the same process. Server `instructions` give agents the five lines they need at startup.
 - **One Cypress at a time**: later calls queue, across projects. Several specs, a glob or the whole suite run in one launch. Each run reports a progress notification per test to clients that ask for one; cancelling the request stops the whole Cypress process tree; a run that hits its timeout returns the tests it finished and the one that hung.
@@ -437,22 +427,7 @@ graph LR
 
 ## Agent Workflow
 
-```mermaid
-graph TD
-    L[cypress_list_specs] -->|find the spec| R[cypress_run]
-    R -->|tests fail| F{enough to fix?}
-    F -->|yes| X[Fix the app or the test]
-    F -->|no| G[cypress_get_failure runId]
-    G -->|excerpt, diff, stack, page| X
-    X -->|path:line, repeat| R
-    R -->|all pass, none flaky| D[Done]
-    R -->|cannot start| H[cypress_doctor]
-
-    style L fill:#1a1a2e,stroke:#e94560,color:#fff
-    style R fill:#16213e,stroke:#0f3460,color:#fff
-    style G fill:#e94560,stroke:#fff,color:#fff
-    style D fill:#2d6a4f,stroke:#40916c,color:#fff
-```
+<p align="center"><img src="https://raw.githubusercontent.com/jams4code/cypress-mcp/main/docs/images/agent-workflow.png" alt="Agent workflow: list specs, run, if tests fail and the result is not enough call get_failure, fix the app or the test, rerun by path:line or repeat; doctor only when Cypress cannot start" width="860"></p>
 
 ## Flaky Tests
 
@@ -549,4 +524,4 @@ npm test
 
 [Apache License 2.0](LICENSE). Free to use, modify and distribute, including commercially and in CI.
 
-Copyright (c) 2026 [JADEV GROUP SARL](https://jadev-group.com) (BE1027.114.687), Brussels, Belgium. See [NOTICE](NOTICE).
+Copyright (c) 2026 [JADEV GROUP SARL](https://www.jadev-corp.com) (BE1027.114.687), Brussels, Belgium. See [NOTICE](NOTICE).
