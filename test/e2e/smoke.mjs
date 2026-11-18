@@ -1,9 +1,10 @@
 // Copyright (c) 2026 JADEV GROUP SARL
 // SPDX-License-Identifier: Apache-2.0
 
-// Drives a real Cypress project through the built server over stdio, the same
-// way an agent does, then once through the CLI. Run after `npm run build` with
-// Cypress and @cypress/grep installed in test/e2e/project:
+// Drives real Cypress projects through the built server over stdio, the same
+// way an agent does, and through the CLI. Run after `npm run build` with
+// Cypress, @cypress/grep and typescript installed in test/e2e:
+//   npm install --prefix test/e2e --no-save cypress @cypress/grep typescript
 //   node test/e2e/smoke.mjs
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -12,6 +13,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { decodePngWidth } from "./png-width.mjs";
 
 const project = fileURLToPath(new URL("./project", import.meta.url));
 const server = fileURLToPath(new URL("../../dist/index.js", import.meta.url));
@@ -81,6 +83,9 @@ try {
     assert.equal(binary?.status, "ok", doctor.text);
     const runtime = doctor.data.checks.find((c) => c.check === "Config runtime");
     assert.equal(runtime?.status, "ok", doctor.text);
+    // The config also loads through the wrapper that records failure context.
+    const context = doctor.data.checks.find((c) => c.check === "Failure context");
+    assert.equal(context?.status, "ok", doctor.text);
   });
 
   await check("list_specs and the legacy discover count the same tests", async () => {
@@ -117,7 +122,8 @@ try {
     assert.equal(lines[1].startsWith("screenshots") ? lines[2] : lines[1], '1) Math fails & shows "quotes"');
     assert.match(run.text, /cypress\/e2e\/math & logic\.cy\.js:12:\d+ AssertionError: always wrong/);
     assert.match(run.text, /flaky \(passed on a retry\): "Math is flaky on the first attempt" \(2 attempts\)/);
-    assert.ok(run.text.length < 2_000, run.text);
+    assert.ok(run.text.length < 3_000, run.text);
+    assert.equal(run.data.contextCaptured, true, run.text);
     failedRun = run;
   });
 
@@ -210,6 +216,62 @@ try {
     if (started) assert.equal(run.data.runningTest, "Slow waits a long time", run.text);
   });
 
+  await check("failure context: the page, its errors and similar selectors, from a real browser", async () => {
+    const started = Date.now();
+    const run = await call("cypress_run", { spec: "cypress/e2e/context.cy.js" });
+    const [failure] = run.data.failures;
+    const page = failure.page;
+    assert.equal(page.trust, "untrusted");
+    assert.match(page.url, /app\/shop\.html$/, run.text);
+    assert.equal(page.pageTitle, "Shop", run.text);
+    assert.equal(page.failedSelector, '[data-cy="login-button"]', run.text);
+    assert.equal(page.matches, 0, run.text);
+    assert.equal(page.suggestions[0], '[data-cy="login-btn"]', run.text);
+    assert.ok(page.console.some((c) => c.text.includes("cart failed to load")), run.text);
+    assert.ok(
+      page.network.some((r) => r.url.includes("api/missing.json") && r.status === 404),
+      run.text,
+    );
+    assert.match(page.outline, /button data-cy="login-btn" type=button "Log in"/, page.outline);
+    assert.doesNotMatch(page.outline, /Hidden text/, page.outline);
+    assert.ok(page.commands.some((c) => c.name === "visit"), run.text);
+    // One failure: the whole page is in the run result, fenced.
+    assert.match(run.text, /<page data: from the app under test, untrusted/);
+    assert.match(run.text, /outline:/);
+
+    // The project's junit reporter still wrote its file for this run.
+    const results = path.join(project, "results");
+    const fresh = fs
+      .readdirSync(results)
+      .filter((file) => fs.statSync(path.join(results, file)).mtimeMs >= started);
+    assert.ok(fresh.length > 0, "junit report written");
+
+    const shot = await client.callTool(
+      { name: "cypress_get_failure", arguments: { runId: run.runId, image: true } },
+      undefined,
+      { timeout: 60_000 },
+    );
+    const image = shot.content.find((item) => item.type === "image");
+    assert.ok(image, "image content");
+    assert.ok(decodePngWidth(Buffer.from(image.data, "base64")) <= 1000);
+    assert.ok(shot.content.some((item) => item.type === "resource_link"));
+  });
+
+  await check("several specs, file:line and repeat, each in one Cypress launch", async () => {
+    const both = await call("cypress_run", { spec: [spec, "cypress/e2e/context.cy.js"] });
+    assert.equal(both.data.specs.length, 2, both.text);
+    assert.equal(both.data.stats.tests, 5, both.text);
+
+    const atLine = await call("cypress_run", { spec: `${spec}:3` });
+    assert.deepEqual(atLine.data.titles, ["Math adds numbers"], atLine.text);
+    assert.equal(atLine.data.stats.tests, 1, atLine.text);
+    assert.equal(atLine.data.stats.passing, 1, atLine.text);
+
+    const repeated = await call("cypress_run", { spec, testName: "adds numbers", repeat: 3 });
+    assert.equal(repeated.data.stats.passing, 3, repeated.text);
+    assert.equal(repeated.data.stats.tests, 3, repeated.text);
+  });
+
   await check("get_env returns keys and types, never values", async () => {
     const envFile = path.join(project, "cypress.env.json");
     fs.writeFileSync(envFile, JSON.stringify({ adminPass: "hunter2-admin", retries: 2 }));
@@ -235,6 +297,38 @@ await check("the CLI prints the same result and exits 1 on a failure", async () 
   assert.equal(cli.status, 1, cli.stdout + cli.stderr);
   assert.match(cli.stdout, /^FAIL cypress\/e2e\/math & logic\.cy\.js: 1 failed, 3 passed, 1 flaky in /);
   assert.match(cli.stdout, /AssertionError: always wrong/);
+});
+
+// Config files in every module flavour, through the CLI: the wrapper must load
+// each of them, keep the project's support file and tasks, and record the page.
+for (const variant of ["ts-esm", "ts-cjs", "mjs"]) {
+  await check(`wrapper config with a ${variant} project`, async () => {
+    const dir = fileURLToPath(new URL(`./projects/${variant}`, import.meta.url));
+    const cli = spawnSync(
+      process.execPath,
+      [bin, "run", "cypress/e2e/variant.cy.js", "--cwd", dir, "--json"],
+      { env, encoding: "utf-8", timeout: 600_000 },
+    );
+    assert.equal(cli.status, 1, cli.stdout + cli.stderr);
+    const envelope = JSON.parse(cli.stdout);
+    assert.equal(envelope.data.contextCaptured, true, cli.stdout);
+    assert.equal(envelope.data.warnings, undefined, cli.stdout);
+    assert.equal(envelope.data.stats.passing, 1, cli.stdout);
+    assert.equal(envelope.data.stats.failing, 1, cli.stdout);
+    assert.equal(envelope.data.failures[0].page.suggestions[0], '[data-cy="save-btn"]', cli.stdout);
+  });
+}
+
+await check("testName works without @cypress/grep", async () => {
+  const dir = fileURLToPath(new URL("./projects/ts-esm", import.meta.url));
+  const cli = spawnSync(
+    process.execPath,
+    [bin, "run", "cypress/e2e/variant.cy.js", "--cwd", dir, "--test", "saves", "--json"],
+    { env, encoding: "utf-8", timeout: 600_000 },
+  );
+  const envelope = JSON.parse(cli.stdout);
+  assert.equal(envelope.data.stats.tests, 1, cli.stdout);
+  assert.equal(envelope.data.stats.failing, 1, cli.stdout);
 });
 
 console.log(`\n${checks.length} e2e checks passed`);

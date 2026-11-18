@@ -1,7 +1,7 @@
 // Copyright (c) 2026 JADEV GROUP SARL
 // SPDX-License-Identifier: Apache-2.0
 import fs from "node:fs/promises";
-import type { FailureDetail } from "../types/results.js";
+import type { FailureDetail, PageContext } from "../types/results.js";
 import type { RunRecord } from "./state-store.js";
 import { parseSpec, type ParsedSpec } from "./spec-parser.js";
 import { excerptAround, findFailureLocation } from "../utils/stack-location.js";
@@ -11,6 +11,8 @@ import { resolveInsideRoot } from "../utils/paths.js";
 export interface FailureContext {
   /** 1-based position in the run's failure list, as the run result numbers them */
   readonly index: number;
+  /** Spec of the failing test, project relative */
+  readonly spec: string;
   readonly title: string;
   readonly fullTitle: string;
   /** Error class read from the stack, e.g. AssertionError, TypeError, CypressError */
@@ -27,6 +29,8 @@ export interface FailureContext {
   readonly stack: string;
   /** Stack line in user code, as 0.2.x returned it (legacy tools) */
   readonly stackHint: string;
+  /** The page when the test failed: untrusted data from the app */
+  readonly page?: PageContext;
 }
 
 const MAX_STACK_CHARS = 1_500;
@@ -51,15 +55,23 @@ export async function buildFailureContexts(
     return source;
   };
 
-  const specSource = await read(record.spec);
-  const parsed = specSource === undefined ? undefined : parseSpec(specSource);
+  const parsedSpecs = new Map<string, ParsedSpec | undefined>();
+  const parsedOf = async (spec: string): Promise<ParsedSpec | undefined> => {
+    if (!parsedSpecs.has(spec)) {
+      const source = await read(spec);
+      parsedSpecs.set(spec, source === undefined ? undefined : parseSpec(source));
+    }
+    return parsedSpecs.get(spec);
+  };
 
   return Promise.all(
     record.result.failures.map(async (failure, i) => {
-      const where = locateFailure(failure, record.spec, parsed);
+      const spec = failure.spec ?? record.spec;
+      const where = locateFailure(failure, spec, await parsedOf(spec));
       const source = where && radius !== null ? await read(where.file) : undefined;
       return {
         index: i + 1,
+        spec,
         title: failure.title,
         fullTitle: failure.fullTitle,
         ...errorNameOf(failure.stack),
@@ -72,6 +84,7 @@ export async function buildFailureContexts(
           : {}),
         stack: userStack(failure.stack),
         stackHint: extractStackHint(failure.stack),
+        ...(failure.page ? { page: failure.page } : {}),
       };
     }),
   );

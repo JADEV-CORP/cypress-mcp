@@ -18,13 +18,14 @@ const MAX_LISTED_TITLES = 100;
 
 /** Prefix of every legacy tool description. */
 export function deprecated(replacement: string, description: string): string {
-  return `Deprecated, removed in 0.4: use ${replacement}. ${description}`;
+  return `Deprecated, removed in 0.5: use ${replacement}. ${description}`;
 }
 
 interface LegacyRunOptions {
   readonly tool: string;
   readonly kind: RunRecord["kind"];
-  readonly spec: string;
+  readonly specs: readonly string[];
+  readonly prefix?: string;
   readonly args: CypressRunArgs;
   readonly testName?: string;
   readonly previousRunId?: string;
@@ -36,13 +37,14 @@ export async function executeLegacyRun(
   ctx: ToolContext,
   options: LegacyRunOptions,
 ): Promise<CallToolResult> {
-  const { tool, spec, args, testName } = options;
+  const { tool, args, testName } = options;
+  const spec = options.specs[0] ?? args.spec;
   const progress = progressNotifier(options.request);
   const outcome = await executeCypressRun(ctx, {
     kind: options.kind,
-    spec,
+    specs: options.specs,
     args,
-    testName,
+    prefix: options.prefix,
     signal: options.request?.mcpReq.signal,
     onProgress: progress.onProgress,
   });

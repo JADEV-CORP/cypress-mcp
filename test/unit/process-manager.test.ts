@@ -188,3 +188,49 @@ describe("parseCypressInfoBrowsers", () => {
     ]);
   });
 });
+
+describe("buildCliArgs with a run workspace", () => {
+  const base = { spec: "cypress/e2e/a.cy.js", grep: "logs in" };
+  const workspace = {
+    dir: "/p/node_modules/.cache/cypress-mcp/runs/run_1-9",
+    screenshotsDir: "/p/node_modules/.cache/cypress-mcp/runs/run_1-9/screenshots",
+    videosDir: "/p/node_modules/.cache/cypress-mcp/runs/run_1-9/videos",
+    reportsDir: "/p/node_modules/.cache/cypress-mcp/runs/run_1-9/reports",
+    contextFile: "/p/node_modules/.cache/cypress-mcp/runs/run_1-9/context.jsonl",
+  };
+
+  it("sends screenshots to the run folder and keeps the reporter and grep without a wrapper", () => {
+    const args = buildCliArgs(base, { expose: true }, "/r.cjs", workspace);
+    expect(JSON.parse(args[args.indexOf("--config") + 1]!)).toEqual({
+      screenshotsFolder: workspace.screenshotsDir,
+      videosFolder: workspace.videosDir,
+    });
+    expect(args).toContain("--reporter");
+    expect(args).toContain("--expose");
+  });
+
+  it("lets the wrapper set the reporter and filter titles", () => {
+    const wrapped = {
+      ...workspace,
+      wrapperConfigFile: "node_modules/.cache/x/cypress-mcp.config.cjs",
+    };
+    const args = buildCliArgs(
+      { ...base, configFile: "cypress.config.js", component: true },
+      { expose: true },
+      "/r.cjs",
+      wrapped,
+    );
+    expect(args.slice(0, 2)).toEqual(["run", "--component"]);
+    expect(args).not.toContain("--reporter");
+    expect(args).not.toContain("--expose");
+    expect(args[args.indexOf("--config-file") + 1]).toBe(wrapped.wrapperConfigFile);
+  });
+
+  it("tells the reporter where the run folder is", () => {
+    const env = buildChildEnv({ MCP_CYPRESS_RUN_DIR: "stale" }, base, workspace);
+    expect(env["MCP_CYPRESS_RUN_DIR"]).toBe(workspace.dir);
+    expect(
+      buildChildEnv({ MCP_CYPRESS_RUN_DIR: "stale" }, base)["MCP_CYPRESS_RUN_DIR"],
+    ).toBeUndefined();
+  });
+});

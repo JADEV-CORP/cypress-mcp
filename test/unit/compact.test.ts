@@ -17,6 +17,10 @@ function record(result: Partial<CypressRunResult>, grep?: string): RunRecord {
     runId: "run_7",
     kind: grep ? "run_test" : "run_spec",
     spec: "cypress/e2e/big.cy.js",
+    specs: ["cypress/e2e/big.cy.js"],
+    projectRoot: ROOT,
+    prefix: "",
+    contextCaptured: true,
     args: { spec: "cypress/e2e/big.cy.js", ...(grep ? { grep } : {}) },
     result: {
       success: true,
@@ -44,6 +48,7 @@ function record(result: Partial<CypressRunResult>, grep?: string): RunRecord {
 function failure(index: number, error: string): FailureContext {
   return {
     index,
+    spec: "cypress/e2e/big.cy.js",
     title: `case ${index}`,
     fullTitle: `Big suite case ${index}`,
     errorName: "AssertionError",
@@ -115,7 +120,7 @@ describe("renderRun", () => {
     };
 
     const text = renderRun(outcome, failures, {
-      projectRoot: ROOT,
+      displayRoot: ROOT,
       nextActions: ["next one"],
     });
     const lines = text.split("\n");
@@ -141,7 +146,7 @@ describe("renderRun", () => {
     const text = renderRun(
       { type: "completed", record: record({ success: false }) },
       [failure(1, long)],
-      { projectRoot: ROOT, nextActions: [] },
+      { displayRoot: ROOT, nextActions: [] },
     );
 
     expect(text).toContain(
@@ -165,7 +170,7 @@ describe("renderRun", () => {
     const text = renderRun(
       { type: "completed", record: record({ success: false, tests }) },
       failures,
-      { projectRoot: ROOT, verbose: true, nextActions: [] },
+      { displayRoot: ROOT, verbose: true, nextActions: [] },
     );
 
     expect(text.length).toBeLessThanOrEqual(MAX_TEXT_CHARS + 200);

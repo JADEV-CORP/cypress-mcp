@@ -8,6 +8,8 @@ import type { ToolContext } from "../../types/index.js";
 import { classifyConfigRuntimeCheck } from "../../utils/cypress-diagnostics.js";
 import { normalizePath } from "../../utils/paths.js";
 import { finish } from "../../format/compact.js";
+import { ProjectRequiredError } from "../../services/projects.js";
+import { prepareWorkspace } from "../../services/run-workspace.js";
 import { READ_ONLY, envelopeSchema, errorResult, textResult } from "../result.js";
 
 const TOOL = "cypress_doctor";
@@ -45,20 +47,21 @@ export function register(server: McpServer, ctx: ToolContext): void {
     {
       title: "Check the Cypress setup",
       description:
-        "Check the Cypress setup: config file, Cypress install, specs, support file, grep plugin, Cloud settings. Starts Cypress once to load the config (about 15 s) unless quick is true. Use it when a run cannot start, not before every session.",
+        "Check the Cypress setup: config file, Cypress install, specs, support file, failure context, Cloud settings. Starts Cypress once to load the config (about 15 s) unless quick is true. Use it when a run cannot start, not before every session.",
       inputSchema: z.object({
         quick: z
           .boolean()
           .optional()
           .describe("Skip starting Cypress; check files and install only"),
+        project: z.string().optional().describe("Monorepos: the project folder to check"),
       }),
       outputSchema: envelopeSchema(doctorDataSchema),
       annotations: READ_ONLY,
     },
-    async ({ quick }) => {
+    async ({ quick, project }) => {
       try {
         const launch = quick !== true;
-        const checks = await runChecks(ctx, launch);
+        const checks = await checksFor(ctx, project, launch);
         const failed = checks.filter((c) => c.status === "fail").length;
         const warned = checks.filter((c) => c.status === "warn").length;
         const healthy = failed === 0;
@@ -88,6 +91,27 @@ export function register(server: McpServer, ctx: ToolContext): void {
       }
     },
   );
+}
+
+/** The checks of the selected project, or a failing "Project" check in a monorepo root. */
+async function checksFor(
+  ctx: ToolContext,
+  project: string | undefined,
+  launch: boolean,
+): Promise<Check[]> {
+  try {
+    const selection = await ctx.projects.select({ project });
+    const checks = await runChecks(selection.ctx, launch);
+    if (selection.prefix) {
+      checks.unshift({ check: "Project", status: "ok", detail: selection.prefix });
+    }
+    return checks;
+  } catch (err) {
+    if (err instanceof ProjectRequiredError) {
+      return [{ check: "Project", status: "fail", detail: err.message }];
+    }
+    throw err;
+  }
 }
 
 async function runChecks(ctx: ToolContext, launch: boolean): Promise<Check[]> {
@@ -143,27 +167,7 @@ async function runChecks(ctx: ToolContext, launch: boolean): Promise<Check[]> {
         "Not checked (quick). Call without quick to start Cypress and load the config.",
     });
   } else if (binaryFound) {
-    try {
-      // A spec that cannot exist: Cypress loads the config, finds no spec and stops.
-      const validation = await ctx.processManager.run({
-        spec: "__cypress_mcp_config_check__.cy.ts",
-        browser: config.defaultBrowser,
-        timeout: Math.min(config.defaultTimeout, 30_000),
-        configFile: config.cypressConfigFile,
-      });
-      const runtimeCheck = classifyConfigRuntimeCheck(
-        validation.exitCode,
-        validation.stdout,
-        validation.stderr,
-      );
-      checks.push({ check: "Config runtime", ...runtimeCheck });
-    } catch (err) {
-      checks.push({
-        check: "Config runtime",
-        status: "warn",
-        detail: err instanceof Error ? err.message : String(err),
-      });
-    }
+    checks.push(...(await runtimeChecks(ctx, config)));
   } else {
     checks.push({
       check: "Config runtime",
@@ -172,12 +176,27 @@ async function runChecks(ctx: ToolContext, launch: boolean): Promise<Check[]> {
     });
   }
 
+  const contextOn = config.failureContext && ctx.wrapperDisabled === undefined;
+  if (!launch || !binaryFound) {
+    checks.push({
+      check: "Failure context",
+      status: contextOn ? "ok" : "warn",
+      detail: contextOn
+        ? "On: runs record the page at each failure and filter titles without a plugin"
+        : config.failureContext
+          ? `Off for this session: ${ctx.wrapperDisabled}`
+          : "Off: failureContext is false in cypress-mcp.config.json",
+    });
+  }
+
   checks.push({
     check: "Test title filter",
-    status: config.titleFilterSupport ? "ok" : "warn",
-    detail: config.titleFilterSupport
-      ? "Configured: cypress_run accepts testName"
-      : "Not configured: cypress_run runs whole specs only. Add @cypress/grep to run one test.",
+    status: contextOn || config.titleFilterSupport ? "ok" : "warn",
+    detail: contextOn
+      ? "testName and file:line work through failure context"
+      : config.titleFilterSupport
+        ? "Through @cypress/grep (failure context is off)"
+        : "Not available: failure context is off and @cypress/grep is not wired in",
   });
 
   checks.push(cloudCheck(config.projectId, Boolean(process.env["CYPRESS_RECORD_KEY"])));
@@ -188,6 +207,93 @@ async function runChecks(ctx: ToolContext, launch: boolean): Promise<Check[]> {
   checks.push(await dirCheck("Downloads dir", config.projectRoot, config.downloadsDir));
 
   return checks;
+}
+
+/**
+ * Starts Cypress on a spec that cannot exist: it loads the config, finds no
+ * spec and stops. With failure context on, the config is loaded through the
+ * wrapper first, so a project it does not suit shows up here.
+ */
+async function runtimeChecks(
+  ctx: ToolContext,
+  config: Awaited<ReturnType<ToolContext["configLoader"]["load"]>>,
+): Promise<Check[]> {
+  const probe = async (wrap: boolean): Promise<{ check: Check; output: string }> => {
+    const workspace = await prepareWorkspace(ctx.projectRoot, `doctor-${process.pid}`, {
+      configFile: config.cypressConfigFile,
+      cypressVersion: await ctx.processManager.cypressVersion(),
+      wrap,
+    });
+    try {
+      const validation = await ctx.processManager.run(
+        {
+          spec: "__cypress_mcp_config_check__.cy.ts",
+          browser: config.defaultBrowser,
+          timeout: Math.min(config.defaultTimeout, 30_000),
+          configFile: config.cypressConfigFile,
+        },
+        { workspace },
+      );
+      const runtimeCheck = classifyConfigRuntimeCheck(
+        validation.exitCode,
+        validation.stdout,
+        validation.stderr,
+      );
+      return {
+        check: { check: "Config runtime", ...runtimeCheck },
+        output: `${validation.stdout}\n${validation.stderr}`,
+      };
+    } catch (err) {
+      return {
+        check: {
+          check: "Config runtime",
+          status: "warn",
+          detail: err instanceof Error ? err.message : String(err),
+        },
+        output: "",
+      };
+    } finally {
+      await fs.rm(workspace.dir, { recursive: true, force: true }).catch(() => undefined);
+    }
+  };
+
+  if (!config.failureContext) {
+    const plain = await probe(false);
+    return [
+      plain.check,
+      {
+        check: "Failure context",
+        status: "warn",
+        detail: "Off: failureContext is false in cypress-mcp.config.json",
+      },
+    ];
+  }
+
+  const wrapped = await probe(true);
+  if (wrapped.check.status === "ok") {
+    ctx.wrapperDisabled = undefined;
+    return [
+      wrapped.check,
+      {
+        check: "Failure context",
+        status: "ok",
+        detail: "On: the config loads through the cypress-mcp wrapper",
+      },
+    ];
+  }
+
+  const plain = await probe(false);
+  if (plain.check.status === "ok") {
+    return [
+      plain.check,
+      {
+        check: "Failure context",
+        status: "warn",
+        detail: `The config loads, but not through the cypress-mcp wrapper, so runs fall back to the plain config without page context: ${wrapped.check.detail}`,
+      },
+    ];
+  }
+  return [plain.check];
 }
 
 async function supportFileCheck(

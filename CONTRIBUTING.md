@@ -22,13 +22,15 @@ npm test             # Run tests
 
 ### E2E against real Cypress
 
-`test/e2e/smoke.mjs` drives `test/e2e/project` through the built server over stdio, the way an agent does, then through the CLI. Run it whenever spec, run or CLI handling changes:
+`test/e2e/smoke.mjs` drives `test/e2e/project` (CommonJS config, junit reporter) through the built server over stdio, the way an agent does, then the TS (ESM and CJS) and MJS projects in `test/e2e/projects` through the CLI. Run it whenever run, wrapper, runtime or CLI handling changes:
 
 ```bash
 npm run build
-npm install --prefix test/e2e/project --no-save --no-package-lock cypress@latest @cypress/grep@latest
+npm install --prefix test/e2e --no-save --no-package-lock cypress@latest @cypress/grep@latest typescript@5
 node test/e2e/smoke.mjs
 ```
+
+`runtime/` is what Cypress loads during a run: `config.cjs` wraps the project's config (it runs in Cypress's config process), `support.js` runs in the browser. Both are plain JavaScript that every supported Cypress and browser must accept; their unit tests run them in Node (`test/unit/runtime-*.test.ts`), the smoke test in a real browser.
 
 CI runs it on Cypress 14 (Linux) and the latest Cypress (Linux and Windows) for every PR, and weekly so a new Cypress release that breaks something is caught before users hit it.
 

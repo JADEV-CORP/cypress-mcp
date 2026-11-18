@@ -52,7 +52,11 @@ describe("published bundle", () => {
     expect(specifiers.length).toBeGreaterThan(0);
     const external = specifiers.filter(
       (specifier) =>
-        !specifier.startsWith("node:") && !builtinModules.includes(specifier),
+        !specifier.startsWith("node:") &&
+        !builtinModules.includes(specifier) &&
+        // The wrapper config cypress-mcp writes for a run imports this; it is
+        // text in a template, not an import of the bundle.
+        specifier !== "./cypress-mcp-runtime.cjs",
     );
     expect(external).toEqual([]);
   });

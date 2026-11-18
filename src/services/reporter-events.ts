@@ -8,8 +8,12 @@
 export const REPORTER_MARKER = "@@cypress-mcp@@";
 
 interface ReporterEvent {
-  readonly event: "start" | "test" | "pass" | "fail" | "pending";
+  readonly event: "start" | "test" | "pass" | "fail" | "pending" | "warning";
   readonly total?: number;
+  /** Spec the reporter runs for (start event) */
+  readonly spec?: string;
+  /** Warning event text */
+  readonly message?: string;
   readonly type?: string;
   readonly title?: string;
   readonly fullTitle?: string;
@@ -20,6 +24,8 @@ interface ReporterEvent {
 
 /** A test, or a failed hook, that finished before the run ended. */
 export interface CompletedTest {
+  /** Spec the test ran in, when the reporter knew it */
+  readonly spec?: string;
   readonly title: string;
   readonly fullTitle: string;
   readonly state: "passed" | "failed" | "pending";
@@ -45,9 +51,13 @@ const STATES = { pass: "passed", fail: "failed", pending: "pending" } as const;
  */
 export class ReporterEventStream {
   readonly completed: CompletedTest[] = [];
+  /** Warnings the reporter printed, e.g. a project reporter it could not load */
+  readonly warnings: string[] = [];
   private output = "";
   private partialLine = "";
+  /** Tests in the specs started so far; grows with each spec of a multi-spec run */
   private total: number | undefined;
+  private spec: string | undefined;
   private running: string | undefined;
   private finishedTests = 0;
 
@@ -100,10 +110,21 @@ export class ReporterEventStream {
     const fullTitle = event.fullTitle ?? event.title ?? "";
 
     if (event.event === "start") {
-      this.total = typeof event.total === "number" ? event.total : undefined;
+      const first = this.spec === undefined && this.total === undefined;
+      this.spec = event.spec;
+      if (typeof event.total === "number") {
+        this.total = (this.total ?? 0) + event.total;
+      }
       this.notify(
-        `Cypress started${this.total === undefined ? "" : `, ${this.total} tests`}`,
+        first
+          ? `Cypress started${event.spec ? ` ${event.spec}` : ""}${typeof event.total === "number" ? `, ${event.total} tests` : ""}`
+          : `Started ${event.spec ?? "the next spec"}`,
       );
+      return;
+    }
+
+    if (event.event === "warning") {
+      if (event.message) this.warnings.push(event.message);
       return;
     }
 
@@ -119,6 +140,7 @@ export class ReporterEventStream {
 
     const hook = event.type === "hook";
     this.completed.push({
+      ...(this.spec ? { spec: this.spec } : {}),
       title: event.title ?? fullTitle,
       fullTitle,
       state,

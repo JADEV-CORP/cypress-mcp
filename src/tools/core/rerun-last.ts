@@ -34,10 +34,11 @@ export function register(server: McpServer, ctx: ToolContext): void {
         if (!previous) {
           throw new RunNotFoundError(runId, ctx.stateStore.runIds());
         }
-        return await executeLegacyRun(ctx, {
+        return await executeLegacyRun(ctx.projects.context(previous.projectRoot), {
           tool: TOOL,
           kind: previous.kind,
-          spec: previous.spec,
+          specs: previous.specs,
+          prefix: previous.prefix,
           args: previous.args,
           testName: previous.args.grep,
           previousRunId: previous.runId,

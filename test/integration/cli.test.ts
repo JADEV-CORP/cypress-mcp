@@ -69,6 +69,20 @@ describe("cypress-mcp run", () => {
     expect(one.stdout).toContain('"shows the cart page": 1 passed');
   });
 
+  it("runs several specs, a file:line and repeats in one launch", () => {
+    const several = cli(["run", "cypress/e2e/pass.cy.js", "cypress/e2e/flaky.cy.js"]);
+    expect(several.status).toBe(0);
+    expect(several.stdout).toMatch(/^PASS 2 specs: 2 passed, 1 flaky in /);
+
+    const atLine = cli(["run", "cypress/e2e/checkout.cy.js:13", "--repeat", "2"]);
+    expect(atLine.status).toBe(0);
+    expect(atLine.stdout).toMatch(
+      /^PASS cypress\/e2e\/checkout\.cy\.js "Checkout shows the cart page" x2: 2 passed/,
+    );
+
+    expect(cli(["run", "cypress/e2e/pass.cy.js", "--repeat", "99"]).status).toBe(2);
+  });
+
   it("prints the envelope with --json", () => {
     const { status, stdout } = cli(["run", "cypress/e2e/checkout.cy.js", "--json"]);
     const envelope = JSON.parse(stdout) as { tool: string; data: { status: string } };
@@ -91,7 +105,7 @@ describe("cypress-mcp run", () => {
   it("prints usage and the version", () => {
     const help = cli(["--help"]);
     expect(help.status).toBe(0);
-    expect(help.stdout).toContain("Usage: cypress-mcp run <spec> [options]");
+    expect(help.stdout).toContain("Usage: cypress-mcp run <spec>... [options]");
 
     const version = cli(["--version"]);
     const pkg = JSON.parse(fs.readFileSync("package.json", "utf-8")) as {

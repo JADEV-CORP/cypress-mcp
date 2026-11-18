@@ -1,6 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import { createRequire } from "node:module";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { OutputParser } from "../../src/services/output-parser.js";
 import {
   ReporterEventStream,
@@ -152,4 +155,125 @@ describe("cypress-mcp-reporter.cjs", () => {
     stream.push(output);
     expect(parser.parse(stream.end(), "", 1).failures[0]?.error).toBe("loop");
   });
+});
+
+describe("cypress-mcp-reporter.cjs with a run folder and the project's reporter", () => {
+  const ReporterWithOptions = Reporter as unknown as new (
+    runner: EventEmitter,
+    options?: object,
+  ) => { done(failures: number, fn: (failures: number) => void): void };
+
+  it("writes each spec's report, with its path, to the run folder", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cypress-mcp-reporter-"));
+    const previous = process.env["MCP_CYPRESS_RUN_DIR"];
+    process.env["MCP_CYPRESS_RUN_DIR"] = dir;
+    try {
+      const printed = runReporterOn(
+        { suite: { total: () => 1, file: "cypress/e2e/a.cy.js" } },
+        (runner) => {
+          runner.emit("start");
+          runner.emit("end");
+        },
+      );
+      expect(printed).toContain('"spec":"cypress/e2e/a.cy.js"');
+      expect(printed).not.toContain('"stats"');
+      const report = JSON.parse(
+        fs.readFileSync(path.join(dir, "reports", "0001.json"), "utf-8"),
+      ) as { spec: string };
+      expect(report.spec).toBe("cypress/e2e/a.cy.js");
+    } finally {
+      if (previous === undefined) delete process.env["MCP_CYPRESS_RUN_DIR"];
+      else process.env["MCP_CYPRESS_RUN_DIR"] = previous;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("runs the project's reporter on the same runner and waits for its done()", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cypress-mcp-inner-"));
+    fs.writeFileSync(
+      path.join(dir, "inner.cjs"),
+      `module.exports = function Inner(runner, options) {
+        globalThis.innerSeen = { options: options.reporterOptions, events: [] };
+        runner.on("pass", (t) => globalThis.innerSeen.events.push(t.title));
+        this.done = (failures, fn) => { globalThis.innerSeen.done = failures; fn(failures); };
+      };`,
+    );
+    try {
+      const runner = Object.assign(new EventEmitter(), { suite: { total: () => 1 } });
+      const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      let reporter;
+      try {
+        reporter = new ReporterWithOptions(runner, {
+          reporterOptions: {
+            cypressMcpInner: {
+              name: "./inner.cjs",
+              options: { mochaFile: "x.xml" },
+              projectRoot: dir,
+            },
+          },
+        });
+        runner.emit("pass", fakeTest("passes"));
+        runner.emit("end");
+      } finally {
+        write.mockRestore();
+      }
+      let finished = -1;
+      reporter.done(0, (failures) => (finished = failures));
+
+      const seen = (
+        globalThis as { innerSeen?: { options: object; events: string[]; done: number } }
+      ).innerSeen;
+      expect(seen?.options).toEqual({ mochaFile: "x.xml" });
+      expect(seen?.events).toEqual(["passes"]);
+      expect(seen?.done).toBe(0);
+      expect(finished).toBe(0);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("warns, and still reports, when the project's reporter cannot be loaded", () => {
+    const printed = runReporterOn(
+      { suite: { total: () => 0 } },
+      (runner) => runner.emit("end"),
+      {
+        reporterOptions: {
+          cypressMcpInner: {
+            name: "no-such-reporter",
+            options: {},
+            projectRoot: os.tmpdir(),
+          },
+        },
+      },
+    );
+    const stream = new ReporterEventStream();
+    stream.push(printed);
+    stream.end();
+    expect(stream.warnings[0]).toContain(
+      'The project\'s reporter "no-such-reporter" could not be loaded',
+    );
+  });
+
+  /** Like runReporter, with runner fields and reporter options of the test's choice. */
+  function runReporterOn(
+    fields: object,
+    drive: (runner: EventEmitter) => void,
+    options?: object,
+  ): string {
+    const runner = Object.assign(new EventEmitter(), fields);
+    const written: string[] = [];
+    const write = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation((chunk: string | Uint8Array) => {
+        written.push(String(chunk));
+        return true;
+      });
+    try {
+      new ReporterWithOptions(runner, options);
+      drive(runner);
+    } finally {
+      write.mockRestore();
+    }
+    return written.join("");
+  }
 });

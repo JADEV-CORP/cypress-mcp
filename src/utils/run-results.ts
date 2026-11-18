@@ -127,7 +127,19 @@ function attachFailureScreenshots(
   const remaining = [...screenshots];
 
   return failures.map((failure) => {
-    const matchIndex = remaining.findIndex((file) => matchesFailure(file, failure));
+    // Several specs can have tests with the same title: Cypress keeps each
+    // spec's screenshots in a folder named after it, so look there first.
+    const inSpecFolder = failure.spec
+      ? remaining.findIndex(
+          (file) =>
+            matchesFailure(file, failure) &&
+            path.basename(path.dirname(file)) === path.basename(failure.spec!),
+        )
+      : -1;
+    const matchIndex =
+      inSpecFolder !== -1
+        ? inSpecFolder
+        : remaining.findIndex((file) => matchesFailure(file, failure));
     if (matchIndex === -1) {
       return { ...failure };
     }

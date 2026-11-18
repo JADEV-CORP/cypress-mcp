@@ -110,6 +110,7 @@ export class ConfigLoader {
       titleFilterSupport:
         serverConfig?.titleFilterSupport ??
         (await this.detectTitleFilterSupport(configFile, configHints.supportFile)),
+      failureContext: serverConfig?.failureContext ?? DEFAULT_CONFIG.failureContext,
       // Same precedence as Cypress itself: env var over config file
       projectId:
         serverConfig?.projectId ??

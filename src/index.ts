@@ -7,6 +7,7 @@ import { CAPABILITIES, parseCaps } from "./caps.js";
 import { CLI_USAGE, runCli } from "./cli.js";
 import { createLogger } from "./utils/logger.js";
 import { resolveProjectRoot } from "./utils/paths.js";
+import { abortAllRuns } from "./services/process-manager.js";
 
 export async function main(argv: string[]): Promise<void> {
   const [command] = argv;
@@ -67,12 +68,12 @@ async function startServer(argv: string[]): Promise<void> {
   // its own once pending responses are flushed.
   process.stdin.on("end", () => {
     logger.info("Client disconnected");
-    void ctx.processManager.abort();
+    void abortAllRuns();
   });
 
   const onSignal = async (signal: string): Promise<void> => {
     logger.info("Shutting down", { signal });
-    await ctx.processManager.abort();
+    await abortAllRuns();
     process.exit(0);
   };
   process.on("SIGINT", () => void onSignal("SIGINT"));

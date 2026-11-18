@@ -3,7 +3,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import type { ToolContext } from "../../types/index.js";
-import { buildRunArgs, cloudOptionsShape, runOptionsShape } from "../run-shared.js";
+import { cloudOptionsShape, prepareRun, runOptionsShape } from "../run-shared.js";
 import { RUNS_CYPRESS } from "../result.js";
 import { deprecated, executeLegacyRun, toolError } from "./execute-run.js";
 
@@ -27,12 +27,13 @@ export function register(server: McpServer, ctx: ToolContext): void {
     },
     async (input, request) => {
       try {
-        const { spec, args } = await buildRunArgs(ctx, input);
-        return await executeLegacyRun(ctx, {
+        const run = await prepareRun(ctx, input);
+        return await executeLegacyRun(run.ctx, {
           tool: TOOL,
           kind: "run_spec",
-          spec,
-          args,
+          specs: run.specs,
+          prefix: run.prefix,
+          args: run.args,
           request,
         });
       } catch (err) {

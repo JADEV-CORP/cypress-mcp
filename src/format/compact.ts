@@ -11,6 +11,11 @@ import type { FailureContext } from "../services/failure-context.js";
 import type { RunRecord } from "../services/state-store.js";
 import type { TestResult } from "../types/results.js";
 import { normalizePath } from "../utils/paths.js";
+import { displayPath } from "../services/projects.js";
+import { fence, INLINE_OUTLINE_CHARS, pageDetail, pageSummary } from "./page.js";
+
+/** Outline in the page view: what the browser kept, about 3,000 tokens. */
+const MAX_PAGE_OUTLINE_CHARS = 12_000;
 
 /**
  * Hard cap on any text result. Claude Code writes results over 50,000
@@ -46,17 +51,43 @@ const STATUS_WORD: Readonly<Record<RunStatus, string>> = {
   no_match: "NO MATCH",
 };
 
+/**
+ * What ran, as the agent asked for it: the spec (relative to the server
+ * root) or the number of specs, then the test filter, repeat and testing type.
+ */
+export function runLabel(record: RunRecord): string {
+  const { args } = record;
+  const parts = [
+    record.specs.length > 1
+      ? `${record.specs.length} specs`
+      : displayPath(record.prefix, record.spec),
+  ];
+  if (args.grep) parts.push(quote(args.grep));
+  else if (args.titles?.length === 1) parts.push(quote(args.titles[0]!));
+  else if (args.titles && args.titles.length > 1)
+    parts.push(`(${args.titles.length} tests)`);
+  if (args.repeat && args.repeat > 1) parts.push(`x${args.repeat}`);
+  if (args.component) parts.push("(component)");
+  return parts.join(" ");
+}
+
 /** The first line of a run result: status, spec, counts, duration, runId. */
 export function runHeadline(outcome: RunOutcome): string {
   const { record } = outcome;
-  const { result, spec, runId } = record;
+  const { result, runId } = record;
   const status = runStatus(outcome);
-  const target = record.args.grep ? `${spec} "${record.args.grep}"` : spec;
+  const target = runLabel(record);
+  const specs =
+    record.specs.length > 1
+      ? `${record.specs.length} specs`
+      : displayPath(record.prefix, record.spec);
   const id = `(runId ${runId})`;
 
   switch (status) {
     case "no_match":
-      return `${STATUS_WORD[status]} ${spec}: no test title contains "${record.args.grep ?? ""}", nothing ran ${id}`;
+      return record.args.grep
+        ? `${STATUS_WORD[status]} ${specs}: no test title contains "${record.args.grep}", nothing ran ${id}`
+        : `${STATUS_WORD[status]} ${specs}: the test at that line did not run, nothing ran ${id}`;
     case "timeout": {
       const where = result.runningTest ? ` while running "${result.runningTest}"` : "";
       return `${STATUS_WORD[status]} ${target}: stopped after ${seconds(result.stats.duration)}${where}; ${counts(record)} before it ${id}`;
@@ -75,7 +106,8 @@ function counts(record: RunRecord): string {
   if (stats.failing > 0 || stats.passing === 0) parts.push(`${stats.failing} failed`);
   parts.push(`${stats.passing} passed`);
   // With a title filter, the tests it left out are reported as pending: noise.
-  if (stats.pending > 0 && !record.args.grep) parts.push(`${stats.pending} pending`);
+  const filtered = Boolean(record.args.grep) || Boolean(record.args.titles?.length);
+  if (stats.pending > 0 && !filtered) parts.push(`${stats.pending} pending`);
   if (stats.skipped > 0) parts.push(`${stats.skipped} skipped`);
   if (stats.flaky > 0) parts.push(`${stats.flaky} flaky`);
   return parts.join(", ");
@@ -97,11 +129,19 @@ function errorDescription(record: RunRecord): string {
 export function renderRun(
   outcome: RunOutcome,
   failures: readonly FailureContext[],
-  options: { projectRoot: string; verbose?: boolean; nextActions: readonly string[] },
+  options: {
+    /** Server root: paths shown to the agent are relative to it */
+    displayRoot: string;
+    verbose?: boolean;
+    nextActions: readonly string[];
+  },
 ): string {
   const { record } = outcome;
   const { result } = record;
   const lines = [runHeadline(outcome)];
+  for (const warning of result.warnings ?? []) {
+    lines.push(`note: ${warning}`);
+  }
 
   if (outcome.type === "no_match") {
     if (outcome.closestMatches.length > 0) {
@@ -121,7 +161,7 @@ export function renderRun(
     lines.push(`cloud: ${result.cloud.runUrl}`);
   }
 
-  lines.push(...failureLines(failures, options.projectRoot));
+  lines.push(...failureLines(failures, record, options.displayRoot));
 
   const flaky = result.tests.filter((test) => test.flaky);
   if (flaky.length > 0 && !options.verbose) {
@@ -140,10 +180,15 @@ export function renderRun(
   return finish(lines, options.nextActions);
 }
 
-/** One block per failure: title, `file:line:col error`, screenshot. */
+/**
+ * One block per failure: title, `file:line:col error`, screenshot, and what
+ * the page showed. With a single failure the page block is complete (outline
+ * included), so one call is enough to fix it.
+ */
 function failureLines(
   failures: readonly FailureContext[],
-  projectRoot: string,
+  record: RunRecord,
+  displayRoot: string,
 ): string[] {
   if (failures.length === 0) {
     return [];
@@ -155,18 +200,33 @@ function failureLines(
   );
   const lines: string[] = [];
   if (screenshotDir) {
-    lines.push(`screenshots in ${relative(projectRoot, screenshotDir)}/`);
+    lines.push(`screenshots in ${relative(displayRoot, screenshotDir)}/`);
   }
 
   for (const failure of shown) {
     lines.push(`${failure.index}) ${failure.fullTitle}`);
     const error = errorText(failure);
-    lines.push(`   ${failure.location ? `${failure.location} ` : ""}${error}`);
+    const where = failure.location
+      ? `${displayPath(record.prefix, failure.location)} `
+      : record.specs.length > 1
+        ? `${displayPath(record.prefix, failure.spec)}: `
+        : "";
+    lines.push(`   ${where}${error}`);
     if (failure.screenshot) {
       const shot = screenshotDir
         ? path.basename(failure.screenshot)
-        : relative(projectRoot, failure.screenshot);
+        : relative(displayRoot, failure.screenshot);
       lines.push(`   screenshot: ${shot}`);
+    }
+    if (failure.page) {
+      lines.push(
+        ...fence(
+          failures.length === 1
+            ? pageDetail(failure.page, INLINE_OUTLINE_CHARS)
+            : pageSummary(failure.page),
+          "   ",
+        ),
+      );
     }
   }
 
@@ -218,6 +278,20 @@ const STATE_TAG: Readonly<Record<TestResult["state"], string>> = {
   skipped: "skip",
 };
 
+/** Every test, grouped under its spec, for runs of several specs. */
+function testLinesBySpec(tests: readonly TestResult[], prefix: string): string[] {
+  const lines: string[] = [];
+  let current: string | undefined;
+  for (const test of tests) {
+    if (test.spec !== current) {
+      current = test.spec;
+      lines.push(`${current ? displayPath(prefix, current) : "(unknown spec)"}:`);
+    }
+    lines.push(`  ${testLines([test])[0]}`);
+  }
+  return lines;
+}
+
 /** Every test of a run, one line each. */
 export function testLines(tests: readonly TestResult[]): string[] {
   return tests.map((test) => {
@@ -240,7 +314,7 @@ export function renderFailureContexts(
   record: RunRecord,
   failures: readonly FailureContext[],
   options: {
-    projectRoot: string;
+    displayRoot: string;
     first: number;
     total: number;
     nextActions: readonly string[];
@@ -257,7 +331,10 @@ export function renderFailureContexts(
         : failures.length === 1
           ? `failure ${options.first} of ${options.total}`
           : `failures ${options.first} to ${options.first + failures.length - 1} of ${options.total}`;
-  const lines = [`${record.spec} (runId ${record.runId}): ${what}`];
+  const lines = [`${runLabel(record)} (runId ${record.runId}): ${what}`];
+  for (const warning of result.warnings ?? []) {
+    lines.push(`note: ${warning}`);
+  }
 
   if (result.error) {
     lines.push(...crashLines(result.error));
@@ -268,7 +345,10 @@ export function renderFailureContexts(
 
   for (const failure of failures) {
     lines.push("", `${failure.index}) ${failure.fullTitle}`);
-    if (failure.location) lines.push(`at ${failure.location}`);
+    if (failure.location)
+      lines.push(`at ${displayPath(record.prefix, failure.location)}`);
+    else if (record.specs.length > 1)
+      lines.push(`in ${displayPath(record.prefix, failure.spec)}`);
     lines.push(
       failure.errorName && !failure.error.startsWith(failure.errorName)
         ? `${failure.errorName}: ${failure.error.trim()}`
@@ -284,22 +364,43 @@ export function renderFailureContexts(
       lines.push(`stack: ${frames.slice(0, 5).join(" | ")}`);
     }
     if (failure.screenshot) {
-      lines.push(`screenshot: ${relative(options.projectRoot, failure.screenshot)}`);
+      lines.push(`screenshot: ${relative(options.displayRoot, failure.screenshot)}`);
+    }
+    if (failure.page) {
+      lines.push(...fence(pageSummary(failure.page), ""));
     }
   }
 
   return finish(lines, options.nextActions);
 }
 
+/** The page view of cypress_get_failure: everything recorded for one failure. */
+export function renderPage(
+  record: RunRecord,
+  failure: FailureContext,
+  options: { total: number; nextActions: readonly string[] },
+): string {
+  const lines = [
+    `${runLabel(record)} (runId ${record.runId}): page at failure ${failure.index} of ${options.total}, ${quote(failure.fullTitle)}`,
+  ];
+  if (failure.location) lines.push(`at ${displayPath(record.prefix, failure.location)}`);
+  lines.push(...fence(pageDetail(failure.page!, MAX_PAGE_OUTLINE_CHARS), ""));
+  return finish(lines, options.nextActions);
+}
+
 export function renderTests(record: RunRecord, nextActions: readonly string[]): string {
   const { result } = record;
   const lines = [
-    `${record.spec} (runId ${record.runId}): ${result.stats.tests} tests, ${counts(record)}, ${seconds(result.stats.duration)}`,
+    `${runLabel(record)} (runId ${record.runId}): ${result.stats.tests} tests, ${counts(record)}, ${seconds(result.stats.duration)}`,
     `args: ${JSON.stringify(compactArgs(record))}`,
   ];
   if (result.cloud) lines.push(`cloud: ${result.cloud.runUrl}`);
   if (result.error) lines.push(...crashLines(result.error));
-  lines.push(...testLines(result.tests));
+  lines.push(
+    ...(record.specs.length > 1
+      ? testLinesBySpec(result.tests, record.prefix)
+      : testLines(result.tests)),
+  );
   return finish(lines, nextActions);
 }
 
@@ -307,15 +408,15 @@ export function renderScreenshots(
   record: RunRecord,
   screenshots: readonly string[],
   missing: number,
-  options: { projectRoot: string; nextActions: readonly string[] },
+  options: { displayRoot: string; nextActions: readonly string[] },
 ): string {
   const lines = [
-    `${record.spec} (runId ${record.runId}): ${screenshots.length} screenshot(s) under ${normalizePath(options.projectRoot)}`,
-    ...screenshots.map((file) => relative(options.projectRoot, file)),
+    `${runLabel(record)} (runId ${record.runId}): ${screenshots.length} screenshot(s) under ${normalizePath(options.displayRoot)}`,
+    ...screenshots.map((file) => relative(options.displayRoot, file)),
   ];
   if (missing > 0) {
     lines.push(
-      `${missing} screenshot(s) of this run were deleted since, usually by a later run (Cypress trashes the screenshots folder before each run)`,
+      `${missing} screenshot(s) of this run were deleted since: the server keeps the folders of about the last 50 runs`,
     );
   }
   return finish(lines, options.nextActions);
@@ -323,7 +424,7 @@ export function renderScreenshots(
 
 export function renderOutput(record: RunRecord, nextActions: readonly string[]): string {
   const lines = [
-    `${record.spec} (runId ${record.runId}): last 2,000 characters of Cypress output`,
+    `${runLabel(record)} (runId ${record.runId}): last 2,000 characters of Cypress output`,
   ];
   lines.push("--- stdout", record.stdoutTail.trim() || "(empty)");
   lines.push("--- stderr", record.stderrTail.trim() || "(empty)");
@@ -336,6 +437,9 @@ function compactArgs(record: RunRecord): Record<string, unknown> {
   return {
     spec: args.spec,
     testName: args.grep,
+    titles: args.titles,
+    repeat: args.repeat,
+    component: args.component,
     browser: args.browser,
     headed: args.headed || undefined,
     timeout: args.timeout,

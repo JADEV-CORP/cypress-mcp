@@ -21,7 +21,7 @@ import { register as analyzeSpec } from "./discovery/analyze-spec.js";
 import { register as getConfig } from "./core/get-config.js";
 import { register as getEnv } from "./setup/get-env.js";
 
-// --caps legacy: the 0.2.x names, deprecated, removed in 0.4
+// --caps legacy: the 0.2.x names, deprecated, removed in 0.5
 import { register as discover } from "./discovery/discover.js";
 import { register as runSpec } from "./core/run-spec.js";
 import { register as runTest } from "./core/run-test.js";

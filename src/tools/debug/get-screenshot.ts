@@ -1,5 +1,6 @@
 // Copyright (c) 2026 JADEV GROUP SARL
 // SPDX-License-Identifier: Apache-2.0
+import path from "node:path";
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import type { ToolContext } from "../../types/index.js";
@@ -39,7 +40,17 @@ export function register(server: McpServer, ctx: ToolContext): void {
           }
           screenshots = [...run.result.screenshots];
         } else {
-          screenshots = await ctx.screenshotResolver.find(spec, testName);
+          // Since 0.4 runs keep screenshots in their own folder: look at the
+          // latest run first, then in the project's screenshots folder.
+          const fromLastRun = matching(
+            ctx.stateStore.getLastRun()?.result.screenshots ?? [],
+            spec,
+            testName,
+          );
+          screenshots =
+            fromLastRun.length > 0
+              ? fromLastRun
+              : await ctx.screenshotResolver.find(spec, testName);
         }
 
         const summary =
@@ -62,4 +73,15 @@ export function register(server: McpServer, ctx: ToolContext): void {
       }
     },
   );
+}
+
+/** The same filter as ScreenshotResolver.find: spec base name, then test name. */
+function matching(files: readonly string[], spec?: string, testName?: string): string[] {
+  const squash = (value: string): string =>
+    value.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+  return files.filter((file) => {
+    if (spec && !file.includes(path.basename(spec, path.extname(spec)))) return false;
+    if (testName && !squash(path.basename(file)).includes(squash(testName))) return false;
+    return true;
+  });
 }

@@ -13,6 +13,7 @@ import {
   TimeoutError,
 } from "../utils/errors.js";
 import { ReporterEventStream, type RunProgress } from "./reporter-events.js";
+import { RUN_DIR_ENV, type RunWorkspace } from "./run-workspace.js";
 import {
   isVersionAtLeast,
   resolveCypressInstall,
@@ -20,10 +21,12 @@ import {
 } from "../utils/paths.js";
 import type { Logger } from "../utils/logger.js";
 
-interface SpawnResult {
+export interface SpawnResult {
   readonly stdout: string;
   readonly stderr: string;
   readonly exitCode: number | null;
+  /** Warnings the reporter printed */
+  readonly warnings: readonly string[];
 }
 
 /** What the installed Cypress CLI accepts. */
@@ -37,6 +40,28 @@ export interface RunOptions {
   readonly signal?: AbortSignal;
   /** Called when Cypress starts the spec and after each test */
   readonly onProgress?: (progress: RunProgress) => void;
+  /** The run's own folder: reports, screenshots and, when set, the wrapper config */
+  readonly workspace?: RunWorkspace;
+}
+
+/**
+ * One Cypress at a time per server, whatever the project: a monorepo has a
+ * ProcessManager per project, and two browsers at once slow both down.
+ */
+const sharedQueue: { tail: Promise<void> } = { tail: Promise.resolve() };
+const activeProcesses = new Set<ChildProcess>();
+
+/** Kill every Cypress this server started. Used when the client goes away. */
+export function abortAllRuns(): Promise<void> {
+  const pids = [...activeProcesses]
+    .map((child) => child.pid)
+    .filter((pid) => pid !== undefined);
+  activeProcesses.clear();
+  return Promise.all(
+    pids.map(
+      (pid) => new Promise<void>((resolve) => treeKill(pid, "SIGTERM", () => resolve())),
+    ),
+  ).then(() => undefined);
 }
 
 /** Grace period between SIGTERM and SIGKILL when stopping Cypress. */
@@ -47,7 +72,6 @@ const CYPRESS_INFO_TIMEOUT_MS = 60_000;
 const BROWSER_NAME_PATTERN = /^[a-z][a-z0-9-]*(?::[a-z0-9-]+)?$/;
 
 export class ProcessManager {
-  private runQueue: Promise<void> = Promise.resolve();
   private activeProcess: ChildProcess | null = null;
   private browsers: { cli: string; names: Promise<readonly string[]> } | null = null;
 
@@ -60,7 +84,7 @@ export class ProcessManager {
 
   /** Run Cypress after any run already in progress (one Cypress at a time). */
   run(args: CypressRunArgs, options: RunOptions = {}): Promise<SpawnResult> {
-    const job = this.runQueue.then(() => {
+    const job = sharedQueue.tail.then(() => {
       // Cancelled while waiting in the queue: never start Cypress.
       if (options.signal?.aborted) {
         throw new RunCancelledError();
@@ -68,7 +92,7 @@ export class ProcessManager {
       return this.executeRun(args, options);
     });
     // The next run waits for this one to end, whatever its outcome.
-    this.runQueue = job.then(
+    sharedQueue.tail = job.then(
       () => undefined,
       () => undefined,
     );
@@ -94,6 +118,11 @@ export class ProcessManager {
    */
   async resolveBinary(): Promise<string> {
     return (await this.resolveInstall()).cli;
+  }
+
+  /** Version of the project's Cypress package, e.g. "16.3.0". */
+  async cypressVersion(): Promise<string> {
+    return (await this.resolveInstall()).version;
   }
 
   private async resolveInstall(): Promise<CypressInstall> {
@@ -202,8 +231,9 @@ export class ProcessManager {
       args,
       { expose: isVersionAtLeast(install.version, 15, 10) },
       this.reporter,
+      options.workspace,
     );
-    const env = buildChildEnv(process.env, args);
+    const env = buildChildEnv(process.env, args, options.workspace);
     const timeout = args.timeout ?? 300_000;
 
     this.logger.info("Running Cypress", {
@@ -248,6 +278,7 @@ export class ProcessManager {
       });
 
       this.activeProcess = child;
+      activeProcesses.add(child);
       const events = new ReporterEventStream(options.onProgress);
       const stderrChunks: Buffer[] = [];
 
@@ -297,6 +328,7 @@ export class ProcessManager {
         if (this.activeProcess === child) {
           this.activeProcess = null;
         }
+        activeProcesses.delete(child);
         callback();
       };
 
@@ -331,7 +363,7 @@ export class ProcessManager {
         } else if (error) {
           reject(error);
         } else {
-          resolve({ stdout, stderr, exitCode });
+          resolve({ stdout, stderr, exitCode, warnings: events.warnings });
         }
       };
 
@@ -371,17 +403,43 @@ export function parseCypressInfoBrowsers(output: string): string[] {
 /**
  * Build the `cypress run` argument list. Each value is one argv entry and no
  * shell is involved, so nothing here is ever interpreted by a shell.
- * Exported for tests.
+ *
+ * With a workspace, screenshots and videos go to the run's own folder, and
+ * when the workspace has a wrapper config, that config sets the reporter (so
+ * the project's reporter can run next to it) and filters titles in the
+ * browser. Without one, the reporter is passed here and a title filter goes
+ * to @cypress/grep. Exported for tests.
  */
 export function buildCliArgs(
   args: CypressRunArgs,
   capabilities: CliCapabilities = { expose: true },
   reporter = "json",
+  workspace?: RunWorkspace,
 ): string[] {
-  const cliArgs = ["run", "--reporter", reporter, "--spec", args.spec];
+  const wrapped = Boolean(workspace?.wrapperConfigFile);
+  const cliArgs = ["run"];
+  if (args.component) {
+    cliArgs.push("--component");
+  }
+  if (!wrapped) {
+    cliArgs.push("--reporter", reporter);
+  }
+  cliArgs.push("--spec", args.spec);
 
-  if (args.configFile) {
-    cliArgs.push("--config-file", args.configFile);
+  const configFile = workspace?.wrapperConfigFile ?? args.configFile;
+  if (configFile) {
+    cliArgs.push("--config-file", configFile);
+  }
+
+  if (workspace) {
+    // JSON, because a path can contain the commas the a=b,c=d form splits on.
+    cliArgs.push(
+      "--config",
+      JSON.stringify({
+        screenshotsFolder: workspace.screenshotsDir,
+        videosFolder: workspace.videosDir,
+      }),
+    );
   }
 
   // Only when asked for: without --browser Cypress uses the project's own
@@ -396,18 +454,19 @@ export function buildCliArgs(
 
   // Cypress parses a JSON object here as-is. The `a=b,c=d` form splits on
   // commas and coerces types, so it cannot carry arbitrary test names.
+  const grep = wrapped ? undefined : args.grep;
   const env: Record<string, string> = { ...args.env };
-  if (args.grep) {
+  if (grep) {
     // Read by @cypress/grep up to v6 (Cypress.env) and by cy.env()
-    env["grep"] = args.grep;
+    env["grep"] = grep;
   }
   if (Object.keys(env).length > 0) {
     cliArgs.push("--env", JSON.stringify(env));
   }
 
-  if (args.grep && capabilities.expose) {
+  if (grep && capabilities.expose) {
     // @cypress/grep 7 reads its options from Cypress.expose()
-    cliArgs.push("--expose", JSON.stringify({ grep: args.grep }));
+    cliArgs.push("--expose", JSON.stringify({ grep }));
   }
 
   if (args.cloud?.record) {
@@ -439,8 +498,14 @@ export function buildCliArgs(
 export function buildChildEnv(
   base: NodeJS.ProcessEnv,
   args: CypressRunArgs,
+  workspace?: RunWorkspace,
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...base };
+  // Read by the reporter (report files) and kept out of a user's own value.
+  delete env[RUN_DIR_ENV];
+  if (workspace) {
+    env[RUN_DIR_ENV] = workspace.dir;
+  }
 
   // A grep left in the parent environment would silently filter every run.
   for (const key of Object.keys(env)) {

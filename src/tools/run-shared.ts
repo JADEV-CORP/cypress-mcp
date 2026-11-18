@@ -5,7 +5,8 @@ import type { ServerContext } from "@modelcontextprotocol/server";
 import type { ToolContext } from "../types/index.js";
 import type { CloudRecordArgs, CypressRunArgs } from "../types/cypress.js";
 import type { RunProgress } from "../services/reporter-events.js";
-import { InvalidArgumentError, TitleFilterUnavailableError } from "../utils/errors.js";
+import { InvalidArgumentError } from "../utils/errors.js";
+import { resolveTargets } from "../services/targets.js";
 
 // Descriptions and constraints are kept short: every tool definition is sent
 // to the model, and this shape is in each run tool. Limits that only guard
@@ -52,6 +53,14 @@ const MAX_CLOUD_ID_LENGTH = 200;
 
 /** Limits the schema leaves out, with messages the agent can act on. */
 function validateRunInput(input: RunInput): void {
+  if (
+    input.repeat !== undefined &&
+    (!Number.isInteger(input.repeat) || input.repeat < 1 || input.repeat > MAX_REPEAT)
+  ) {
+    throw new InvalidArgumentError(
+      `repeat must be a whole number from 1 to ${MAX_REPEAT}.`,
+    );
+  }
   for (const key of Object.keys(input.env ?? {})) {
     if (key.length === 0) {
       throw new InvalidArgumentError("env keys must not be empty.");
@@ -84,8 +93,13 @@ function validateRunInput(input: RunInput): void {
 }
 
 export interface RunInput {
-  spec: string;
+  /** A spec path, `path:line`, a glob, or several of those */
+  spec: string | string[];
   testName?: string;
+  /** Project folder under the server root (monorepos) */
+  project?: string;
+  component?: boolean;
+  repeat?: number;
   browser?: string;
   headed?: boolean;
   timeout?: number;
@@ -95,6 +109,18 @@ export interface RunInput {
   group?: string;
   ciBuildId?: string;
 }
+
+/** A prepared run: the project it belongs to and the arguments for Cypress. */
+export interface PreparedRun {
+  readonly ctx: ToolContext;
+  /** Project folder relative to the server root, "" at the root */
+  readonly prefix: string;
+  /** Spec files, project relative */
+  readonly specs: readonly string[];
+  readonly args: CypressRunArgs;
+}
+
+export const MAX_REPEAT = 50;
 
 export function toCloudArgs(input: {
   record?: boolean;
@@ -114,24 +140,39 @@ export function toCloudArgs(input: {
 }
 
 /**
- * Check the spec and the browser, then build the `cypress run` arguments.
- * Throws CypressMcpError for anything the caller can fix.
+ * Find the project and the specs, check the browser, then build the
+ * `cypress run` arguments. Throws CypressMcpError for anything the caller can
+ * fix. Title filters are checked when the run starts: with the wrapper config
+ * they need no plugin.
  */
-export async function buildRunArgs(
-  ctx: ToolContext,
+export async function prepareRun(
+  root: ToolContext,
   input: RunInput,
-): Promise<{ spec: string; args: CypressRunArgs }> {
+): Promise<PreparedRun> {
   validateRunInput(input);
-  const spec = await ctx.specFinder.resolveSpec(input.spec);
-  const config = await ctx.configLoader.load();
-  if (input.testName !== undefined && !config.titleFilterSupport) {
-    throw new TitleFilterUnavailableError();
+  const inputs = Array.isArray(input.spec) ? input.spec : [input.spec];
+  const {
+    ctx,
+    prefix,
+    specs: projectSpecs,
+  } = await root.projects.select({
+    project: input.project,
+    specs: inputs,
+  });
+  const targets = await resolveTargets(ctx, projectSpecs);
+  if (targets.titles && input.testName !== undefined) {
+    throw new InvalidArgumentError(
+      "Use either testName or a file:line target, not both: file:line already picks the test.",
+    );
   }
+  const config = await ctx.configLoader.load();
 
   return {
-    spec,
+    ctx,
+    prefix,
+    specs: targets.specs,
     args: {
-      spec,
+      spec: targets.cypressSpec,
       browser:
         input.browser === undefined
           ? config.defaultBrowser
@@ -140,6 +181,9 @@ export async function buildRunArgs(
       timeout: input.timeout ?? config.defaultTimeout,
       env: input.env,
       grep: input.testName,
+      ...(targets.titles ? { titles: targets.titles } : {}),
+      ...(input.repeat !== undefined && input.repeat > 1 ? { repeat: input.repeat } : {}),
+      ...(input.component ? { component: true } : {}),
       configFile: config.cypressConfigFile,
       cloud: toCloudArgs(input),
     },

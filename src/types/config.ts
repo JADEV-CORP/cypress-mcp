@@ -16,9 +16,15 @@ export interface CypressMcpConfig {
   readonly titleFilterSupport: boolean;
   /** Cypress Cloud project id, needed to record runs and to query Cloud MCP */
   readonly projectId?: string;
+  /**
+   * Run through the wrapper config that records the page at each failure and
+   * filters titles without @cypress/grep. Default true.
+   */
+  readonly failureContext: boolean;
 }
 
 export interface RawServerConfig {
+  failureContext?: boolean;
   cypressConfigFile?: string;
   defaultBrowser?: string;
   defaultTimeout?: number;
@@ -37,6 +43,7 @@ export const DEFAULT_CONFIG: Omit<CypressMcpConfig, "projectRoot" | "cypressConf
     downloadsDir: "cypress/downloads",
     specPattern: ["cypress/e2e/**/*.cy.{ts,js,tsx,jsx}"],
     titleFilterSupport: false,
+    failureContext: true,
   };
 
 export const CYPRESS_CONFIG_FILES = [
@@ -44,6 +51,8 @@ export const CYPRESS_CONFIG_FILES = [
   "cypress.config.js",
   "cypress.config.mjs",
   "cypress.config.cjs",
+  "cypress.config.mts",
+  "cypress.config.cts",
 ] as const;
 
 export const SERVER_CONFIG_FILE = "cypress-mcp.config.json";

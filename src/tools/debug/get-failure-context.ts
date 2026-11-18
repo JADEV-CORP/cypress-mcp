@@ -77,7 +77,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
           );
         }
 
-        const contexts = await buildFailureContexts(run, ctx.projectRoot, 5);
+        const contexts = await buildFailureContexts(run, run.projectRoot, 5);
         const failures = contexts.map((f) => ({
           testTitle: f.title,
           fullTitle: f.fullTitle,
