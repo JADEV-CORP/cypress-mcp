@@ -1,7 +1,7 @@
 {
   "name": "cypress-mcp",
-  "version": "0.2.2",
-  "description": "MCP server for AI-driven Cypress test execution. Run, debug, and iterate on E2E tests from your AI agent, with Cypress Cloud recording and flaky test detection.",
+  "version": "0.3.0",
+  "description": "MCP server and CLI that let AI coding agents run and debug Cypress tests: compact failures with file:line, error and screenshot, flaky test detection, Cypress Cloud recording.",
   "mcpName": "io.github.jams4code/cypress-mcp",
   "type": "module",
   "bin": {
@@ -10,8 +10,9 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
-    "dist",
-    "!dist/*.map",
+    "dist/index.js",
+    "dist/index.d.ts",
+    "dist/THIRD_PARTY_NOTICES.md",
     "bin",
     "reporter",
     "skill",
@@ -20,7 +21,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && node scripts/third-party-notices.mjs",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
     "lint": "eslint src/ test/ reporter/",
@@ -58,21 +59,21 @@
   "engines": {
     "node": ">=22.12.0"
   },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.32.1",
-    "tinyglobby": "^0.2.17",
-    "tree-kill": "^1.2.2",
-    "zod": "^4.6.7"
-  },
   "devDependencies": {
+    "@modelcontextprotocol/client": "^2.4.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@modelcontextprotocol/server": "^2.4.0",
     "@types/node": "^22.20.5",
     "@typescript-eslint/eslint-plugin": "^8.71.2",
     "@typescript-eslint/parser": "^8.71.2",
     "eslint": "^9.39.5",
     "prettier": "^3.9.10",
+    "tinyglobby": "^0.2.17",
+    "tree-kill": "^1.2.2",
     "tsup": "^8.5.0",
     "typescript": "^5.8.0",
-    "vitest": "^5.0.5"
+    "vitest": "^5.0.5",
+    "zod": "^4.6.7"
   },
   "peerDependencies": {
     "cypress": ">=12.0.0"

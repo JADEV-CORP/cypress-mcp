@@ -1,167 +1,117 @@
 // Copyright (c) 2026 JADEV GROUP SARL
 // SPDX-License-Identifier: Apache-2.0
-import fs from "node:fs/promises";
-import path from "node:path";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
+import type { McpServer } from "@modelcontextprotocol/server";
 import type { ToolContext } from "../../types/index.js";
-import type { CypressRunResult, FailureDetail } from "../../types/results.js";
-import { parseSpec, type ParsedSpec } from "../../services/spec-parser.js";
-import { excerptAround, findSpecLocation } from "../../utils/stack-location.js";
+import type { CypressRunResult } from "../../types/results.js";
+import { LAST_RUN } from "../../services/state-store.js";
+import { buildFailureContexts } from "../../services/failure-context.js";
+import { RunNotFoundError } from "../../utils/errors.js";
 import { crashNextActions } from "../../utils/run-results.js";
+import { READ_ONLY, legacyErrorResult, legacyResult } from "../result.js";
+import { deprecated } from "../core/execute-run.js";
+
+const TOOL = "cypress_get_failure_context";
 
 export function register(server: McpServer, ctx: ToolContext): void {
-  server.tool(
-    "cypress_get_failure_context",
-    "Get a compact debugging bundle for the most recent failure. Returns the failing test, error, stack hint, screenshot paths, relevant spec excerpt, and recommended next actions. This is the key tool for the fix-and-rerun loop.",
-    {},
-    async () => {
-      const lastRun = ctx.stateStore.getLastRun();
+  server.registerTool(
+    TOOL,
+    {
+      title: "Get Cypress failure context (deprecated)",
+      description: deprecated(
+        "cypress_get_failure",
+        "Debugging bundle for the failures of a run: failing test, error, stack hint, location, spec excerpt and screenshot paths.",
+      ),
+      inputSchema: z.object({
+        runId: z
+          .string()
+          .min(1)
+          .default(LAST_RUN)
+          .describe('Run to inspect; "last" is the latest run of this server'),
+      }),
+      annotations: READ_ONLY,
+    },
+    async ({ runId }) => {
+      try {
+        const run = ctx.stateStore.getRun(runId);
+        if (!run) {
+          throw new RunNotFoundError(runId, ctx.stateStore.runIds());
+        }
 
-      if (!lastRun) {
-        return {
-          content: [
+        if (run.result.error) {
+          return legacyResult(
             {
-              type: "text" as const,
-              text: JSON.stringify({
-                ok: false,
-                tool: "cypress_get_failure_context",
-                summary: "No test run recorded. Run a spec first.",
-                data: null,
-                nextActions: ["cypress_run_spec", "cypress_discover"],
-              }),
+              ok: false,
+              tool: TOOL,
+              summary: crashSummary(run.result, run.spec),
+              data: {
+                runId: run.runId,
+                spec: run.spec,
+                error: run.result.error,
+                runningTest: run.result.runningTest,
+                failures:
+                  run.result.failures.length > 0 ? run.result.failures : undefined,
+                stdoutTail: run.stdoutTail || undefined,
+                stderrTail: run.stderrTail || undefined,
+              },
+              nextActions: crashNextActions(run.result) ?? [
+                "cypress_get_last_run",
+                "cypress_rerun_last",
+              ],
             },
-          ],
-        };
-      }
+            true,
+          );
+        }
 
-      if (lastRun.result.error) {
-        return {
-          content: [
+        if (run.result.failures.length === 0) {
+          return legacyResult(
             {
-              type: "text" as const,
-              text: JSON.stringify(
-                {
-                  ok: false,
-                  tool: "cypress_get_failure_context",
-                  summary: crashSummary(lastRun.result, lastRun.spec),
-                  data: {
-                    runId: lastRun.runId,
-                    spec: lastRun.spec,
-                    error: lastRun.result.error,
-                    runningTest: lastRun.result.runningTest,
-                    failures:
-                      lastRun.result.failures.length > 0
-                        ? lastRun.result.failures
-                        : undefined,
-                    stdoutTail: lastRun.stdoutTail || undefined,
-                    stderrTail: lastRun.stderrTail || undefined,
-                  },
-                  nextActions: crashNextActions(lastRun.result) ?? [
-                    "cypress_doctor",
-                    "cypress_get_last_run",
-                    "cypress_rerun_last",
-                  ],
-                },
-                null,
-                2,
-              ),
+              ok: true,
+              tool: TOOL,
+              summary: "Last run had no failures.",
+              data: { runId: run.runId, spec: run.spec },
+              nextActions: [],
             },
-          ],
-          isError: true,
-        };
-      }
+            false,
+            false,
+          );
+        }
 
-      if (lastRun.result.failures.length === 0) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify({
-                ok: true,
-                tool: "cypress_get_failure_context",
-                summary: "Last run had no failures.",
-                data: { runId: lastRun.runId, spec: lastRun.spec },
-                nextActions: ["cypress_discover"],
-              }),
-            },
-          ],
-        };
-      }
-
-      // Build context for each failure
-      const config = await ctx.configLoader.load();
-      const source = await readSpec(config.projectRoot, lastRun.spec);
-      const parsed = source === undefined ? undefined : parseSpec(source);
-      const failures = lastRun.result.failures.map((f) => {
-        const where = locateFailure(f, lastRun.spec, parsed);
-        const location = where
-          ? [lastRun.spec, where.line, where.column].filter((part) => part).join(":")
-          : undefined;
-
-        return {
+        const contexts = await buildFailureContexts(run, ctx.projectRoot, 5);
+        const failures = contexts.map((f) => ({
           testTitle: f.title,
           fullTitle: f.fullTitle,
           error: f.error,
-          stackHint: extractStackHint(f.stack),
-          location,
+          stackHint: f.stackHint,
+          location: f.location,
           diff: f.diff,
           screenshot: f.screenshot,
-          specExcerpt:
-            where && source !== undefined ? excerptAround(source, where.line) : undefined,
-        };
-      });
+          specExcerpt: f.excerpt,
+        }));
+        const screenshots = await ctx.screenshotResolver.find(run.spec);
 
-      const screenshots = await ctx.screenshotResolver.find(lastRun.spec);
-
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify(
-              {
-                ok: true,
-                tool: "cypress_get_failure_context",
-                summary: `${failures.length} failure(s) in ${lastRun.spec}`,
-                data: {
-                  runId: lastRun.runId,
-                  spec: lastRun.spec,
-                  failures,
-                  screenshots,
-                  stderrTail: lastRun.stderrTail || undefined,
-                },
-                nextActions: [
-                  "Fix the failing test(s) based on the error and spec excerpt",
-                  "cypress_rerun_last",
-                  "cypress_get_screenshot",
-                ],
-              },
-              null,
-              2,
-            ),
+        return legacyResult({
+          ok: true,
+          tool: TOOL,
+          summary: `${failures.length} failure(s) in ${run.spec}`,
+          data: {
+            runId: run.runId,
+            spec: run.spec,
+            failures,
+            screenshots,
+            stderrTail: run.stderrTail || undefined,
           },
-        ],
-      };
+          nextActions: [
+            "Fix the failing test(s) based on the error and spec excerpt",
+            "cypress_rerun_last",
+            "cypress_get_screenshot",
+          ],
+        });
+      } catch (err) {
+        return legacyErrorResult(TOOL, err, ctx.logger);
+      }
     },
   );
-}
-
-/** Extract the most useful line from a stack trace */
-function extractStackHint(stack: string): string {
-  const lines = stack.split("\n").map((l) => l.trim());
-
-  // Find the first line that points to user code (not cypress internals)
-  const userLine = lines.find(
-    (l) =>
-      l.includes(".cy.ts") ||
-      l.includes(".cy.js") ||
-      l.includes("cypress/e2e") ||
-      l.includes("cypress/support"),
-  );
-
-  if (userLine) return userLine;
-
-  // Fallback: first non-empty line after the error message
-  return lines.find((l) => l.startsWith("at ")) ?? lines[0] ?? "";
 }
 
 function crashSummary(result: CypressRunResult, spec: string): string {
@@ -174,40 +124,4 @@ function crashSummary(result: CypressRunResult, spec: string): string {
       : `Last run timed out in ${spec}`;
   }
   return `Last run crashed before tests executed in ${spec}`;
-}
-
-async function readSpec(projectRoot: string, spec: string): Promise<string | undefined> {
-  const absolute = path.isAbsolute(spec) ? spec : path.join(projectRoot, spec);
-  try {
-    return await fs.readFile(absolute, "utf-8");
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Where in the spec a failure happened. The stack frame that points into the
- * spec is exact (Cypress maps it to the original source). Without one, for
- * example when the error comes from a support file, the test's own it() line
- * is the next best place, so every failure still gets an excerpt.
- */
-function locateFailure(
-  failure: FailureDetail,
-  spec: string,
-  parsed: ParsedSpec | undefined,
-): { line: number; column?: number } | undefined {
-  const fromStack = findSpecLocation(failure.stack, spec);
-  if (fromStack) {
-    return fromStack;
-  }
-
-  // Hook failures are titled `"before each" hook for "<test title>"`.
-  const hookTarget = /hook for "(.+)"$/.exec(failure.title)?.[1];
-  const declared = parsed?.tests.find(
-    (test) =>
-      test.fullTitle === failure.fullTitle ||
-      test.name === failure.title ||
-      (hookTarget !== undefined && test.name === hookTarget),
-  );
-  return declared ? { line: declared.line } : undefined;
 }

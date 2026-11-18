@@ -22,7 +22,7 @@ npm test             # Run tests
 
 ### E2E against real Cypress
 
-`test/e2e/smoke.mjs` drives `test/e2e/project` through the built server over stdio, the way an agent does. Run it whenever spec, run or CLI handling changes:
+`test/e2e/smoke.mjs` drives `test/e2e/project` through the built server over stdio, the way an agent does, then through the CLI. Run it whenever spec, run or CLI handling changes:
 
 ```bash
 npm run build
@@ -34,8 +34,10 @@ CI runs it on Cypress 14 (Linux) and the latest Cypress (Linux and Windows) for 
 
 ## Project Structure
 
-- `src/tools/`: One file per MCP tool, grouped by category
-- `src/services/`: Business logic (process manager, parser, config loader)
+- `src/tools/`: One file per MCP tool. `run.ts` and `get-failure.ts` are the default loop; `src/tools/index.ts` decides which tools each `--caps` group adds
+- `src/format/compact.ts`: The text agents read, for the tools and the CLI
+- `src/cli.ts`: `cypress-mcp run <spec>`
+- `src/services/`: Business logic (process manager, run executor, failure context, parser, config loader)
 - `src/utils/`: Shared utilities (logger, paths, errors, sanitize)
 - `src/types/`: TypeScript type definitions
 - `test/unit`, `test/integration`: Vitest suites
@@ -43,11 +45,10 @@ CI runs it on Cypress 14 (Linux) and the latest Cypress (Linux and Windows) for 
 
 ## Adding a New Tool
 
-1. Create a file in `src/tools/<category>/your-tool.ts`
-2. Export a `register` function following the existing pattern
-3. Import and register it in `src/tools/index.ts`
-4. Add unit tests
-5. Update README.md
+1. Create a file in `src/tools/`, exporting a `register` function that calls `server.registerTool` with a `title`, annotations (`READ_ONLY` or `RUNS_CYPRESS` from `src/tools/result.ts`), an `outputSchema` built with `envelopeSchema`, and a handler that returns `textResult(...)` or `errorResult(...)`
+2. Register it in `src/tools/index.ts`. A new tool goes in an optional `--caps` group unless agents need it in every session: each default tool costs context in every client
+3. Add tests: the integration tests list the tools and check `structuredContent` against the `outputSchema`
+4. Update README.md
 
 ## Pull Requests
 
@@ -57,7 +58,7 @@ CI runs it on Cypress 14 (Linux) and the latest Cypress (Linux and Windows) for 
 - Run `npm run typecheck && npm run lint && npm run format:check && npm test` before pushing
 - Merge needs green CI (3 OSes, Node 22 and 24), E2E and CodeQL
 
-Dependabot opens grouped dependency PRs every Monday. Production dependency bumps use `fix(deps):` so they ship in the next patch release.
+Dependabot opens grouped dependency PRs every Monday. The runtime dependencies are bundled into `dist/index.js` and are listed under `devDependencies`, so a bump of one of them (the `bundled` group) only reaches users with the next release: release after a security fix in one of them. `node scripts/audit-prod.mjs` (after `npm run build`) fails on advisories in the bundled packages.
 
 ## Code Style
 

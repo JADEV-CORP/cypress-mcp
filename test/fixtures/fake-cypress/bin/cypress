@@ -50,7 +50,7 @@ const spec = valueAfter("--spec") ?? "";
 const grep = valueAfter("--expose") ? JSON.parse(valueAfter("--expose")).grep : undefined;
 const emit = (event) => process.stdout.write(`${MARKER}${JSON.stringify(event)}\n`);
 
-/** Tests of each spec: [suite, title, error or null, stack]. */
+/** Tests of each spec: [suite, title, error or null, stack, retries before the final attempt]. */
 const SPECS = {
   "pass.cy.js": [["Shop basics", "shows the title", null]],
   "checkout.cy.js": [
@@ -68,9 +68,31 @@ const SPECS = {
     ],
     ["Checkout", "shows the cart page", null],
   ],
+  "flaky.cy.js": [["Flaky", "passes on retry", null, undefined, 1]],
+  "support.cy.js": [
+    [
+      "Support",
+      "logs in through a custom command",
+      "Expected to find element: `#user`, but never found it.",
+      "CypressError: Expected to find element\n    at https://localhost:4000/__cypress/runner/cypress_runner.js:1:2\n    at Context.login (webpack://shop/./cypress/support/commands.js:3:8)",
+    ],
+  ],
 };
 
 const name = path.basename(spec);
+
+if (name === "broken.cy.js") {
+  // What Cypress prints when the preprocessor cannot bundle a spec.
+  console.log("  Running:  broken.cy.js (1 of 1)\n");
+  console.log("Oops...we found an error preparing this test file:\n");
+  console.log("  > cypress/e2e/broken.cy.js\n");
+  console.log("The error was:\n");
+  console.log("Error: Webpack Compilation Error");
+  console.log("Module not found: Error: Can't resolve './does-not-exist' in '/shop/cypress/e2e'");
+  console.log("    at handle (/cache/Cypress/16.3.0/webpack-preprocessor/dist/index.js:302:23)");
+  process.exitCode = 1;
+  return;
+}
 
 if (name === "hang.cy.js") {
   // Like the Cypress binary, a child that keeps running if only this
@@ -87,11 +109,11 @@ if (name === "hang.cy.js") {
   return;
 }
 
-const tests = (SPECS[name] ?? SPECS["pass.cy.js"]).map(([suite, title, error, stack]) => {
+const tests = (SPECS[name] ?? SPECS["pass.cy.js"]).map(([suite, title, error, stack, retries]) => {
   const fullTitle = `${suite} ${title}`;
   // Like @cypress/grep without grepOmitFiltered: filtered tests are pending.
   const state = grep && !fullTitle.includes(grep) ? "pending" : error ? "failed" : "passed";
-  return { title, fullTitle, state, err: error ? { message: error, stack } : {} };
+  return { title, fullTitle, state, retries: retries ?? 0, err: error ? { message: error, stack } : {} };
 });
 
 console.log("  Running:  " + name + " (1 of 1)");
@@ -106,7 +128,7 @@ const clean = (test) => ({
   title: test.title,
   fullTitle: test.fullTitle,
   duration: 10,
-  currentRetry: 0,
+  currentRetry: test.retries,
   err: test.err,
 });
 const by = (state) => tests.filter((test) => test.state === state).map(clean);

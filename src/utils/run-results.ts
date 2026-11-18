@@ -55,11 +55,9 @@ export function buildRunSummary(
   return `${result.stats.failing} failing, ${result.stats.passing} passing in ${spec}${flaky}`;
 }
 
-export function buildRunNextActions(
-  result: CypressRunResult,
-  options?: { includeDiscoverOnSuccess?: boolean },
-): string[] {
-  const actions = localNextActions(result, options);
+/** Next actions of the legacy run tools (cypress_run_spec, cypress_run_test). */
+export function buildRunNextActions(result: CypressRunResult): string[] {
+  const actions = localNextActions(result);
 
   // A recorded run is also queryable through Cypress Cloud MCP, which adds
   // Test Replay and history across runs. Point the agent there by run URL.
@@ -78,12 +76,10 @@ export function buildRunNextActions(
   return actions;
 }
 
-function localNextActions(
-  result: CypressRunResult,
-  options?: { includeDiscoverOnSuccess?: boolean },
-): string[] {
+function localNextActions(result: CypressRunResult): string[] {
   if (result.error) {
-    return crashNextActions(result) ?? ["cypress_doctor", "cypress_get_last_run"];
+    // The output usually explains the crash; the doctor launches Cypress.
+    return crashNextActions(result) ?? ["cypress_get_last_run", "cypress_doctor"];
   }
 
   if (result.stats.failing > 0) {
@@ -97,10 +93,7 @@ function localNextActions(
     ];
   }
 
-  if (options?.includeDiscoverOnSuccess && result.stats.passing > 0) {
-    return ["cypress_discover"];
-  }
-
+  // A pass needs nothing more; 0.2.x sent agents to cypress_discover here.
   return [];
 }
 

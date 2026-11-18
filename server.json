@@ -2,18 +2,18 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.jams4code/cypress-mcp",
   "title": "cypress-mcp",
-  "description": "Run and debug Cypress tests from an AI agent: structured failures, screenshots, flaky tests.",
+  "description": "Run and debug Cypress tests from an AI agent: compact failures with file:line, error, screenshot.",
   "repository": {
     "url": "https://github.com/jams4code/cypress-mcp",
     "source": "github"
   },
-  "version": "0.2.2",
+  "version": "0.3.0",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "cypress-mcp",
-      "version": "0.2.2",
+      "version": "0.3.0",
       "transport": {
         "type": "stdio"
       },
@@ -23,6 +23,13 @@
           "name": "--cwd",
           "description": "Root of the Cypress project (the folder with cypress.config.*). Defaults to CLAUDE_PROJECT_DIR when Claude Code sets it, else the directory the client starts the server in.",
           "format": "filepath",
+          "isRequired": false
+        },
+        {
+          "type": "named",
+          "name": "--caps",
+          "description": "Optional tool groups, comma separated: analyze, config, legacy (the 0.2 tool names), or all.",
+          "format": "string",
           "isRequired": false
         }
       ],

@@ -48,6 +48,48 @@ export function findSpecLocation(
   return fallback;
 }
 
+export interface FileLocation extends SourceLocation {
+  /** Project-relative path with forward slashes */
+  readonly file: string;
+}
+
+/** Bundler prefixes Cypress leaves on mapped frames: `webpack://name/./`, `webpack:///./`. */
+const BUNDLER_PREFIX = /^[a-z-]+:\/\/[^/]*\/(?:\.\/)?/i;
+
+/**
+ * The first place in the project's own code a failure points to: the spec
+ * when a frame is in it, else the first frame in another project file (a
+ * support file, a page object). Frames in Cypress's runner, in node_modules or
+ * served over http are skipped. Returns undefined when no frame qualifies.
+ */
+export function findFailureLocation(
+  stack: string,
+  spec: string,
+): FileLocation | undefined {
+  const inSpec = findSpecLocation(stack, spec);
+  if (inSpec) {
+    return { file: normalize(spec), ...inSpec };
+  }
+
+  for (const line of stack.split("\n")) {
+    const match = FRAME_PATTERN.exec(line);
+    if (!match) {
+      continue;
+    }
+    const raw = decode(match[1]!);
+    if (/^https?:\/\//.test(raw) || raw.includes("__cypress") || raw.startsWith("<")) {
+      continue;
+    }
+    const file = normalize(raw.replace(BUNDLER_PREFIX, ""));
+    if (file.includes("node_modules/") || path.posix.isAbsolute(file)) {
+      continue;
+    }
+    return { file, line: Number(match[2]), column: Number(match[3]) };
+  }
+
+  return undefined;
+}
+
 function normalize(file: string): string {
   return file
     .replace(/\\/g, "/")

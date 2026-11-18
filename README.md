@@ -5,15 +5,27 @@
 [![CI](https://github.com/jams4code/cypress-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/jams4code/cypress-mcp/actions/workflows/ci.yml)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D22.12-brightgreen.svg)](https://nodejs.org)
 
-MCP server that gives AI coding agents full control over Cypress test execution.
+MCP server and CLI that let AI coding agents run and debug Cypress tests.
 
-Run, debug, and iterate on E2E tests directly from Claude Code, Codex, GitHub Copilot, Cursor, Gemini CLI, or any MCP-compatible agent, without switching to a terminal. Works alongside [Cypress Cloud MCP](https://docs.cypress.io/cloud/integrations/cloud-mcp): record local runs to Cloud and hand the run URL straight to its tools.
+One call runs a spec and returns what the agent needs to fix it: one block per failure with `file:line`, the error and the screenshot, in a few hundred tokens. Works with Claude Code, Codex, GitHub Copilot, Cursor, Gemini CLI, Zed, JetBrains and any other MCP client, and alongside [Cypress Cloud MCP](https://docs.cypress.io/cloud/integrations/cloud-mcp): record local runs to Cloud and hand the run URL straight to its tools.
+
+```text
+FAIL cypress/e2e/checkout.cy.js: 2 failed, 1 passed in 9.9s (runId run_2)
+screenshots in cypress/screenshots/checkout.cy.js/
+1) Checkout adds one item to the cart
+   cypress/e2e/checkout.cy.js:5:37 AssertionError: Timed out retrying after 2000ms: expected '<span>' to have text '1', but the text was '2'
+   screenshot: Checkout -- adds one item to the cart (failed) (attempt 2).png
+2) Checkout logs in with valid credentials
+   cypress/e2e/checkout.cy.js:10:7 AssertionError: Timed out retrying after 2000ms: Expected to find element: `[data-cy="login-button"]`, but never found it.
+   screenshot: Checkout -- logs in with valid credentials (failed) (attempt 2).png
+next: cypress_get_failure {"runId":"run_2"} for source excerpts, diffs and stacks
+```
 
 ## Requirements
 
 - Node.js 22.12 or newer.
 - Cypress installed in the project: `npm install --save-dev cypress`. cypress-mcp runs the project's own Cypress and never downloads one.
-- For `cypress_run_test`: [`@cypress/grep`](https://github.com/cypress-io/cypress/tree/develop/npm/grep) registered in the support file or config.
+- To run a single test (`testName`): [`@cypress/grep`](https://github.com/cypress-io/cypress/tree/develop/npm/grep) registered in the support file or config.
 
 ## Setup
 
@@ -23,7 +35,9 @@ Every client starts the same command:
 npx -y cypress-mcp --cwd /path/to/your/project
 ```
 
-`--cwd` is the folder that holds `cypress.config.*`. Without it, cypress-mcp uses `CLAUDE_PROJECT_DIR` when Claude Code sets it, otherwise the directory the client starts it in. `cypress_doctor` tells you which project it found. A first `npx` run downloads the package, which can take several seconds: allow for it where the client has a startup timeout.
+`--cwd` is the folder that holds `cypress.config.*`. Without it, cypress-mcp uses `CLAUDE_PROJECT_DIR` when Claude Code sets it, otherwise the directory the client starts it in. `cypress_doctor` tells you which project it found. The package has no dependencies to install (they are bundled), so a first `npx` run downloads one file and starts in a second or two.
+
+Add `--caps` for more tools: `--caps analyze,config`, `--caps legacy` for the 0.2 tool names, or `--caps all`. See [Tools](#tools).
 
 ### Timeouts
 
@@ -298,98 +312,111 @@ Keep secrets such as `CYPRESS_RECORD_KEY` in the user file, not the committed pr
 
 This README is for the `cypress-mcp` package on npm, built from [jams4code/cypress-mcp](https://github.com/jams4code/cypress-mcp). Two unrelated GitHub projects, `yashpreetbathla/cypress-mcp` and `sbtungd2/cypress-mcp`, tell their users to run `npx cypress-mcp` or `npm install cypress-mcp`. Those commands install this package, not their code, and their flags (such as `--port` or `--base-url`) do nothing here. If you followed one of their guides, use that project's own install steps.
 
-## Why
+## Tools
 
-AI agents can write Cypress tests but can't run them. Every change requires you to switch to terminal, run `npx cypress run`, wait, copy the output back. This kills iteration speed.
-
-**cypress-mcp** closes the loop. The agent runs specs, reads failures, views screenshots, inspects crash context, spots flaky tests, reruns the last command, and discovers the test suite, all within the conversation.
-
-## Tools (12)
-
-### Core Loop
+Four tools by default. Every tool definition an agent loads costs context, so the rest are opt-in.
 
 | Tool | What it does |
 |------|-------------|
-| `cypress_run_spec` | Run a spec file headless, get structured JSON results (optionally recorded to Cypress Cloud) |
-| `cypress_run_test` | Run a single test by name (grep filter); fails with the closest titles when the name matches nothing |
-| `cypress_rerun_last` | Replay the exact last run without rebuilding arguments |
-| `cypress_list_specs` | List all spec files with test counts |
+| `cypress_run` | Run one spec headless, or one test with `testName`. Returns one block per failure (`file:line`, error, screenshot), the flaky tests, and a `runId`. Passing tests are listed with `verbose: true`. |
+| `cypress_get_failure` | Inspect a run by `runId`. `view: "failures"` (default): each failure with a source excerpt, the diff and the stack. `"tests"`: every test and its state. `"screenshots"`: image paths. `"output"`: the end of Cypress's stdout and stderr. |
+| `cypress_list_specs` | Spec files and their test counts, read statically. `titles: true` adds each test's full title. |
+| `cypress_doctor` | Checks the config, the Cypress install, specs, support file, grep plugin and Cloud settings. Starts Cypress once (about 15 s) unless `quick: true`. |
 
-### Debug
+Optional groups, with `--caps <group>[,<group>]`, `--caps=all`, or the `CYPRESS_MCP_CAPS` environment variable:
 
-| Tool | What it does |
-|------|-------------|
-| `cypress_get_failure_context` | Compact debugging bundle: error, file and line, spec excerpt, screenshots, next actions |
-| `cypress_get_screenshot` | Find failure screenshots by spec or test name |
-| `cypress_get_last_run` | Full results of the most recent run, including per-test attempts and flaky flags |
+| Group | Tools |
+|-------|-------|
+| `analyze` | `cypress_analyze_spec`: describe/it outline with line numbers, `cy.visit` URLs, intercepts, fixtures, custom commands |
+| `config` | `cypress_get_config`: resolved config and Cloud status. `cypress_get_env`: keys and value types of `cypress.env.json`, never the values |
+| `legacy` | The 0.2 tool names, deprecated and removed in 0.4 (see below) |
 
-### Discovery
+Every result has a short text block, which is what the agent reads, and the full data in `structuredContent`, described by the tool's `outputSchema`. Read tools are annotated `readOnlyHint: true` (Claude Code runs them in parallel); `cypress_run` is `destructiveHint: false`, `idempotentHint: false`, `openWorldHint: true`. Errors are tool results with `isError: true` and the same envelope (`ok`, `tool`, `summary`, `data.code`, `nextActions`).
 
-| Tool | What it does |
-|------|-------------|
-| `cypress_discover` | Map the entire test suite: specs, test names, counts |
-| `cypress_analyze_spec` | Deep-parse a spec: describe blocks, visits, intercepts, fixtures |
+### runId
 
-### Setup
+Each run gets a `runId` (`run_1`, `run_2`, ...), kept in memory for the life of the server (the latest 50). Pass it to `cypress_get_failure`. `"last"` is accepted and means the latest run of this server, which is another agent's run when several agents or subagents share the server.
 
-| Tool | What it does |
-|------|-------------|
-| `cypress_get_config` | Resolved configuration and Cypress Cloud status (projectId, record key present) |
-| `cypress_get_env` | Keys of cypress.env.json and the type of each value; values are never returned |
-| `cypress_doctor` | Health check: config, binary, specs, support file, Cloud setup, directories |
+### Upgrading from 0.2
+
+The 0.2 tool names still work with `--caps legacy` until 0.4. They return the 0.2 JSON text and their descriptions say they are deprecated.
+
+| 0.2 | 0.3 |
+|-----|-----|
+| `cypress_run_spec {spec}` | `cypress_run {spec}` |
+| `cypress_run_test {spec, testName}` | `cypress_run {spec, testName}` |
+| `cypress_rerun_last` | `cypress_run` with the same arguments |
+| `cypress_get_failure_context` | `cypress_get_failure {runId}` |
+| `cypress_get_last_run` | `cypress_get_failure {runId, view: "tests"}` |
+| `cypress_get_screenshot` | `cypress_get_failure {runId, view: "screenshots"}` |
+| `cypress_discover` | `cypress_list_specs {titles: true}` |
+| `cypress_analyze_spec`, `cypress_get_config`, `cypress_get_env` | Same names, with `--caps analyze` or `--caps config` |
+
+`cypress_list_specs`, `cypress_doctor`, `cypress_analyze_spec`, `cypress_get_config` and `cypress_get_env` now answer in compact text with the data in `structuredContent`, like the new tools, instead of JSON text.
+
+## CLI
+
+Agents that have a shell can run the same thing without MCP:
+
+```bash
+npx cypress-mcp run cypress/e2e/checkout.cy.js
+npx cypress-mcp run cypress/e2e/checkout.cy.js --test "adds one item" --verbose
+npx cypress-mcp run cypress/e2e/checkout.cy.js --json      # the full result as JSON
+```
+
+The output is the same text as `cypress_run`. Exit code 0 when every test passed, 1 when a test failed or the run did not complete (compile error, timeout, no test matched `--test`), 2 for bad arguments or a missing spec or Cypress. Other options: `--browser <name>`, `--headed`, `--timeout <ms>`, `--env key=value` (repeatable), `--cwd <dir>`. `npx cypress-mcp --help` lists them.
 
 ## How It Works
 
 ```mermaid
 graph LR
     A[AI Agent] -->|stdio JSON-RPC| B[cypress-mcp]
-    B -->|child_process.spawn| C[Cypress Runtime]
-    C -->|JSON reporter| B
-    B -->|structured result| A
+    B -->|node cypress/bin/cypress run| C[Cypress]
+    C -->|reporter events and report| B
+    B -->|compact text + structuredContent| A
 
     style A fill:#1a1a2e,stroke:#e94560,color:#fff
     style B fill:#16213e,stroke:#0f3460,color:#fff
     style C fill:#0f3460,stroke:#533483,color:#fff
 ```
 
-- **stdio transport**: the agent spawns the server as a child process
-- **Serial execution**: one Cypress run at a time, no concurrency
-- **Progress and cancellation**: a progress notification per test for clients that ask for one; cancelling the request stops the whole Cypress process tree; a run that hits its timeout returns the tests it finished and the one that hung
-- **Structured output**: JSON results with failure details, diffs, file and line, screenshot paths, attempts and flaky flags. A small Mocha reporter shipped in the package (`reporter/cypress-mcp-reporter.cjs`) replaces `--reporter json` for the run and prints the same report
-- **Config-aware**: auto-detects `cypress.config.*`, follows relative imports, respects custom paths, and picks up changes to those files without a restart
-- **No shell**: Cypress is started with `node` directly and every argument is passed verbatim, so test names and paths with spaces, quotes or `&` are safe on every platform
-- **Stays in the project**: spec paths outside the project root are rejected, and `browser` only accepts names that `cypress info` lists (Cypress would otherwise run any executable path given there)
-- **Cross-platform**: Windows, macOS, Linux
+- **Protocol**: stdio, built on the MCP TypeScript SDK v2. It serves 2025 clients (the `initialize` handshake) and 2026-07-28 clients (per-request metadata, `server/discover`) from the same process. Server `instructions` give agents the five lines they need at startup.
+- **One run at a time**: later calls queue. Each run reports a progress notification per test to clients that ask for one; cancelling the request stops the whole Cypress process tree; a run that hits its timeout returns the tests it finished and the one that hung.
+- **Results**: a small Mocha reporter shipped in the package (`reporter/cypress-mcp-reporter.cjs`) replaces `--reporter json` for the run and prints the same report plus one event line per test. Failure locations come from the stack, so a failure in a support file or page object points there.
+- **Config-aware**: auto-detects `cypress.config.*`, follows relative imports, respects custom paths, and picks up changes to those files without a restart.
+- **No shell**: Cypress is started with `node` directly and every argument is passed verbatim, so test names and paths with spaces, quotes or `&` are safe on every platform.
+- **Stays in the project**: spec paths outside the project root are rejected, and `browser` only accepts names that `cypress info` lists (Cypress would otherwise run any executable path given there).
+- **Size limits**: a text result never goes over 40,000 characters (Claude Code moves results over 50,000 to a file). A run lists its first 30 failures; `cypress_get_failure` pages through the rest.
+- **Cross-platform**: Windows, macOS, Linux.
 
 ## Agent Workflow
 
 ```mermaid
 graph TD
-    D[cypress_discover] -->|map test suite| E[cypress_analyze_spec]
-    E -->|understand spec| F[cypress_run_spec]
-    F -->|tests fail| G[cypress_get_failure_context]
-    G -->|error + excerpt + screenshots| H[Fix the code]
-    H -->|iterate| I[cypress_rerun_last]
-    I -->|still failing| G
-    I -->|passing| J[Done]
-    F -->|tests pass| J
+    L[cypress_list_specs] -->|find the spec| R[cypress_run]
+    R -->|tests fail| F{enough to fix?}
+    F -->|yes| X[Fix the app or the test]
+    F -->|no| G[cypress_get_failure runId]
+    G -->|excerpt, diff, stack| X
+    X -->|run again| R
+    R -->|all pass, none flaky| D[Done]
+    R -->|cannot start| H[cypress_doctor]
 
-    style D fill:#1a1a2e,stroke:#e94560,color:#fff
-    style F fill:#16213e,stroke:#0f3460,color:#fff
+    style L fill:#1a1a2e,stroke:#e94560,color:#fff
+    style R fill:#16213e,stroke:#0f3460,color:#fff
     style G fill:#e94560,stroke:#fff,color:#fff
-    style I fill:#0f3460,stroke:#533483,color:#fff
-    style J fill:#2d6a4f,stroke:#40916c,color:#fff
+    style D fill:#2d6a4f,stroke:#40916c,color:#fff
 ```
 
 ## Flaky Tests
 
-With [test retries](https://docs.cypress.io/app/guides/test-retries) enabled, every test result carries `attempts` and `flaky`. A test is flaky when it failed and then passed within the same run, the same rule Cypress Cloud uses. Run summaries count them (`All 12 tests passed in login.cy.ts (1 flaky)`), so the agent sees instability on the first run instead of after it reaches CI.
+With [test retries](https://docs.cypress.io/app/guides/test-retries) enabled, every test result carries `attempts` and `flaky`. A test is flaky when it failed and then passed within the same run, the same rule Cypress Cloud uses. The run result names them (`flaky (passed on a retry): "Checkout applies the coupon" (2 attempts)`), so the agent sees instability on the first run instead of after it reaches CI.
 
 ## Cypress Cloud
 
 cypress-mcp runs tests on your machine. [Cypress Cloud MCP](https://docs.cypress.io/cloud/integrations/cloud-mcp) reads results recorded in Cypress Cloud: run history, flaky test analytics, Test Replay, UI Coverage and Accessibility. They do different jobs and work well together. No tool names overlap, so an agent can load both.
 
-**Record a local run.** Pass `record: true` to `cypress_run_spec` or `cypress_run_test`, with optional `tags`, `group` and `ciBuildId`. The result includes the Cloud run:
+**Record a local run.** Pass `record: true` to `cypress_run`, with optional `tags`, `group` and `ciBuildId`. The text result has a `cloud:` line with the run URL, and `structuredContent` has:
 
 ```json
 "cloud": {
@@ -399,7 +426,7 @@ cypress-mcp runs tests on your machine. [Cypress Cloud MCP](https://docs.cypress
 }
 ```
 
-When a recorded run fails, `nextActions` points the agent at Cloud MCP's `cypress_get_failed_tests` with that URL, for Test Replay links and history.
+When a recorded run fails, the next actions point the agent at Cloud MCP's `cypress_get_failed_tests` with that URL, for Test Replay links and history.
 
 **Setup.** Recording needs a `projectId` (read from your Cypress config, `CYPRESS_PROJECT_ID`, or `cypress-mcp.config.json`) and a record key. The key goes in the server environment, never in a tool call, so it never passes through the agent:
 
@@ -440,9 +467,9 @@ Works out of the box for standard Cypress projects. For custom setups, create `c
 
 Every field is optional. Without `defaultBrowser`, no `--browser` flag is passed and Cypress uses the project's own browser setting. `defaultTimeout` (milliseconds, default 300000) is the per-run limit; keep your MCP client's tool timeout above it (see [Timeouts](#timeouts)).
 
-`cypress_run_test` filters by test title through [`@cypress/grep`](https://github.com/cypress-io/cypress/tree/develop/npm/grep). It is detected automatically when the plugin is registered in your support file or config. The filter is passed with `--expose` on Cypress 15.10+ (where `@cypress/grep` 7 reads it) and with `--env` for older plugin versions.
+`testName` filters by test title through [`@cypress/grep`](https://github.com/cypress-io/cypress/tree/develop/npm/grep). It is detected automatically when the plugin is registered in your support file or config. The filter is passed with `--expose` on Cypress 15.10+ (where `@cypress/grep` 7 reads it) and with `--env` for older plugin versions.
 
-Env values passed to the run tools reach your tests through `cy.env()` on Cypress 15.10+ and `Cypress.env()` on older versions. They are sent as one JSON argument, so commas, quotes and string types are preserved.
+Env values passed to `cypress_run` (`env`) or the CLI (`--env`) reach your tests through `cy.env()` on Cypress 15.10+ and `Cypress.env()` on older versions. They are sent as one JSON argument, so commas, quotes and string types are preserved.
 
 ## Supported Versions
 
@@ -455,7 +482,7 @@ Env values passed to the run tools reach your tests through `cy.env()` on Cypres
 | Registry | Package | Status |
 |----------|---------|--------|
 | **npm** | [`cypress-mcp`](https://www.npmjs.com/package/cypress-mcp) | Published |
-| **MCP Registry** | `io.github.jams4code/cypress-mcp` | Published by the release workflow from 0.2.2 |
+| **MCP Registry** | `io.github.jams4code/cypress-mcp` | Published by the release workflow |
 | **GitHub** | [`jams4code/cypress-mcp`](https://github.com/jams4code/cypress-mcp) | Source |
 
 ## Development
@@ -467,6 +494,8 @@ npm install
 npm run build
 npm test
 ```
+
+`npm run build` bundles the server and its dependencies into `dist/index.js` and writes their licenses to `dist/THIRD_PARTY_NOTICES.md`. See [CONTRIBUTING.md](CONTRIBUTING.md) for the end-to-end test against a real Cypress.
 
 ## License
 

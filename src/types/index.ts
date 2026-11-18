@@ -36,6 +36,8 @@ import type { StateStore } from "../services/state-store.js";
 import type { Logger } from "../utils/logger.js";
 
 export interface ToolContext {
+  /** Absolute root of the Cypress project (--cwd) */
+  readonly projectRoot: string;
   readonly processManager: ProcessManager;
   readonly outputParser: OutputParser;
   readonly configLoader: ConfigLoader;

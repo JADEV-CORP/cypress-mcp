@@ -1,8 +1,9 @@
 // Drives the built server through the MCP SDK client, the way an agent does,
 // against a temp project whose node_modules/cypress is the fake CLI in
-// test/fixtures/fake-cypress. Covers what only shows end to end: progress,
-// cancellation, timeouts, the arguments passed to Cypress, and the responses
-// agents read. Needs `npm run build` first, like server.test.ts.
+// test/fixtures/fake-cypress. Covers what only shows end to end: the compact
+// text agents read, structuredContent against each tool's outputSchema,
+// runIds, progress, cancellation, timeouts, the arguments passed to Cypress,
+// and the legacy tool names behind --caps. Needs `npm run build` first.
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
@@ -22,16 +23,26 @@ let client: Client;
 
 interface Envelope {
   ok: boolean;
+  tool: string;
+  runId?: string;
   summary: string;
   data: Record<string, unknown>;
   nextActions: string[];
+  previousRunId?: string;
 }
 
+interface Called {
+  isError: boolean;
+  text: string;
+  structured: Envelope;
+}
+
+/** Calls a tool and returns its text and structuredContent. */
 async function call(
   name: string,
   args: Record<string, unknown> = {},
   options: { signal?: AbortSignal; onprogress?: (p: Progress) => void } = {},
-): Promise<{ isError: boolean; body: Envelope }> {
+): Promise<Called> {
   const result = await client.callTool({ name, arguments: args }, undefined, {
     timeout: 30_000,
     ...options,
@@ -39,8 +50,18 @@ async function call(
   const content = result.content as { type: string; text: string }[];
   return {
     isError: result.isError === true,
-    body: JSON.parse(content[0]!.text) as Envelope,
+    text: content[0]!.text,
+    structured: result.structuredContent as unknown as Envelope,
   };
+}
+
+/** Calls a legacy tool, whose text is the 0.2.x JSON envelope. */
+async function callLegacy(
+  name: string,
+  args: Record<string, unknown> = {},
+): Promise<{ isError: boolean; body: Envelope }> {
+  const { isError, text } = await call(name, args);
+  return { isError, body: JSON.parse(text) as Envelope };
 }
 
 /** Arguments of every `cypress run` the server started, oldest first. */
@@ -83,7 +104,13 @@ beforeAll(async () => {
 
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined && key !== "CYPRESS_RECORD_KEY") env[key] = value;
+    if (
+      value !== undefined &&
+      key !== "CYPRESS_RECORD_KEY" &&
+      key !== "CYPRESS_MCP_CAPS"
+    ) {
+      env[key] = value;
+    }
   }
   env["FAKE_CYPRESS_LOG"] = argvLog;
   env["FAKE_CYPRESS_PIDS"] = pidFile;
@@ -92,11 +119,14 @@ beforeAll(async () => {
   await client.connect(
     new StdioClientTransport({
       command: process.execPath,
-      args: [SERVER_PATH, "--cwd", root],
+      args: [SERVER_PATH, "--cwd", root, "--caps", "all"],
       env,
       stderr: "ignore",
     }),
   );
+  // The SDK client validates structuredContent against each tool's
+  // outputSchema once it has listed the tools, so every call below checks it.
+  await client.listTools();
 });
 
 afterAll(async () => {
@@ -112,67 +142,241 @@ afterAll(async () => {
 beforeEach(() => {
   fs.rmSync(argvLog, { force: true });
   fs.rmSync(pidFile, { force: true });
+  // Screenshots a test created must not leak into the next one.
+  fs.rmSync(path.join(root, "cypress", "screenshots"), { recursive: true, force: true });
 });
 
-describe("cypress_run_test with a name that matches nothing (B1)", () => {
-  it("fails and lists the closest real titles instead of reporting a pass", async () => {
-    const { isError, body } = await call("cypress_run_test", {
-      spec: "cypress/e2e/checkout.cy.js",
-      testName: "logs in with valid credential",
-    });
-    expect(isError).toBe(false);
-    expect(body.ok).toBe(true);
-
-    const miss = await call("cypress_run_test", {
-      spec: "cypress/e2e/checkout.cy.js",
-      testName: "does not exist anywhere",
-    });
-    expect(miss.isError).toBe(true);
-    expect(miss.body.ok).toBe(false);
-    expect(miss.body.summary).toContain("No test matched");
-    expect(miss.body.data["code"]).toBe("NO_TEST_MATCHED");
-    expect(miss.body.data["testTitles"]).toEqual([
-      "Checkout adds one item to the cart",
-      "Checkout logs in with valid credentials",
-      "Checkout shows the cart page",
-    ]);
-    expect((miss.body.data["closestMatches"] as string[]).length).toBeGreaterThan(0);
-  });
-
-  it("ranks a close typo first", async () => {
-    const miss = await call("cypress_run_test", {
-      spec: "cypress/e2e/checkout.cy.js",
-      testName: "Checkout shows the kart page",
-    });
-    expect(miss.isError).toBe(true);
-    expect((miss.body.data["closestMatches"] as string[])[0]).toBe(
-      "Checkout shows the cart page",
+describe("cypress_run", () => {
+  it("returns one block per failure with file:line, error and screenshot, and a runId", async () => {
+    const shots = path.join(root, "cypress", "screenshots", "checkout.cy.js");
+    fs.mkdirSync(shots, { recursive: true });
+    fs.writeFileSync(
+      path.join(shots, "Checkout -- adds one item to the cart (failed).png"),
+      "",
     );
-  });
-});
 
-describe("progress, cancellation and timeouts (B2)", () => {
-  it("sends one progress notification per test when asked", async () => {
     const progress: Progress[] = [];
-    const { body } = await call(
-      "cypress_run_spec",
+    const { isError, text, structured } = await call(
+      "cypress_run",
       { spec: "cypress/e2e/checkout.cy.js" },
       { onprogress: (p) => progress.push(p) },
     );
 
-    expect(body.data["stats"]).toMatchObject({ tests: 3, passing: 1, failing: 2 });
-    expect(progress.map((p) => p.progress)).toEqual([0, 1, 2, 3]);
-    expect(progress.every((p) => p.total === 3)).toBe(true);
-    expect(progress[1]?.message).toBe("failed: Checkout adds one item to the cart");
-    expect(progress[3]?.message).toBe("passed: Checkout shows the cart page");
+    expect(isError).toBe(false);
+    const runId = structured.runId!;
+    expect(runId).toMatch(/^run_\d+$/);
+    expect(text.split("\n")).toEqual([
+      `FAIL cypress/e2e/checkout.cy.js: 2 failed, 1 passed in 0.0s (runId ${runId})`,
+      "1) Checkout adds one item to the cart",
+      "   cypress/e2e/checkout.cy.js:5:37 AssertionError: Timed out retrying after 2000ms: expected '<span>' to have text '1', but the text was '2'",
+      "   screenshot: cypress/screenshots/checkout.cy.js/Checkout -- adds one item to the cart (failed).png",
+      "2) Checkout logs in with valid credentials",
+      '   cypress/e2e/checkout.cy.js:10:7 AssertionError: Timed out retrying after 2000ms: Expected to find element: `[data-cy="login-button"]`, but never found it.',
+      `next: cypress_get_failure {"runId":"${runId}"} for source excerpts, diffs and stacks`,
+    ]);
     // Event lines are consumed, never shown to the agent.
-    expect(JSON.stringify(body)).not.toContain("@@cypress-mcp@@");
+    expect(text).not.toContain("@@cypress-mcp@@");
+
+    expect(structured).toMatchObject({ ok: true, tool: "cypress_run", runId });
+    expect(structured.data).toMatchObject({
+      spec: "cypress/e2e/checkout.cy.js",
+      status: "failed",
+      stats: { tests: 3, passing: 1, failing: 2 },
+    });
+    const failures = structured.data["failures"] as {
+      location?: string;
+      screenshot?: string;
+    }[];
+    expect(failures.map((f) => f.location)).toEqual([
+      "cypress/e2e/checkout.cy.js:5:37",
+      "cypress/e2e/checkout.cy.js:10:7",
+    ]);
+    expect(path.isAbsolute(failures[0]!.screenshot!)).toBe(true);
+    expect(structured.data["tests"]).toHaveLength(3);
+
+    // One notification when Cypress starts, then one per test.
+    expect(progress.map((p) => p.progress)).toEqual([0, 1, 2, 3]);
+    expect(progress[1]?.message).toBe("failed: Checkout adds one item to the cart");
   });
 
+  it("omits passing tests unless verbose", async () => {
+    const quiet = await call("cypress_run", { spec: "cypress/e2e/pass.cy.js" });
+    expect(quiet.text).toMatch(
+      /^PASS cypress\/e2e\/pass\.cy\.js: 1 passed in 0\.0s \(runId run_\d+\)$/,
+    );
+
+    const verbose = await call("cypress_run", {
+      spec: "cypress/e2e/pass.cy.js",
+      verbose: true,
+    });
+    expect(verbose.text.split("\n")[1]).toBe("ok   Shop basics shows the title (10ms)");
+  });
+
+  it("names tests that passed only on a retry", async () => {
+    const { text, structured } = await call("cypress_run", {
+      spec: "cypress/e2e/flaky.cy.js",
+    });
+
+    expect(text).toContain("1 passed, 1 flaky");
+    expect(text).toContain(
+      'flaky (passed on a retry): "Flaky passes on retry" (2 attempts)',
+    );
+    expect(structured.data["status"]).toBe("passed");
+  });
+
+  it("points a failure in a support file at that file", async () => {
+    const { text, structured } = await call("cypress_run", {
+      spec: "cypress/e2e/support.cy.js",
+    });
+
+    expect(text).toContain(
+      "   cypress/support/commands.js:3:8 CypressError: Expected to find element",
+    );
+    const [failure] = structured.data["failures"] as { location: string }[];
+    expect(failure!.location).toBe("cypress/support/commands.js:3:8");
+  });
+
+  it("reports a spec that does not compile as an error with its cause, without the doctor", async () => {
+    const { isError, text, structured } = await call("cypress_run", {
+      spec: "cypress/e2e/broken.cy.js",
+    });
+
+    expect(isError).toBe(true);
+    expect(structured.ok).toBe(false);
+    expect(structured.data).toMatchObject({ status: "error", errorKind: "compile" });
+    expect(text).toMatch(
+      /^ERROR cypress\/e2e\/broken\.cy\.js: the spec did not compile, no test ran/,
+    );
+    expect(text).toContain("Module not found: Error: Can't resolve './does-not-exist'");
+    expect(text).not.toContain("Oops");
+    expect(text).not.toContain("cypress_doctor");
+  });
+});
+
+describe("cypress_run with a testName that matches nothing (B1)", () => {
+  it("fails and lists the closest real titles instead of reporting a pass", async () => {
+    const hit = await call("cypress_run", {
+      spec: "cypress/e2e/checkout.cy.js",
+      testName: "logs in with valid credential",
+    });
+    expect(hit.isError).toBe(false);
+    // The tests the filter left out are not reported as pending.
+    expect(hit.text).toMatch(/: 1 failed, 0 passed in /);
+
+    const miss = await call("cypress_run", {
+      spec: "cypress/e2e/checkout.cy.js",
+      testName: "does not exist anywhere",
+    });
+    expect(miss.isError).toBe(true);
+    expect(miss.text).toContain(
+      'NO MATCH cypress/e2e/checkout.cy.js: no test title contains "does not exist anywhere"',
+    );
+    expect(miss.structured.data["status"]).toBe("no_match");
+    expect(miss.structured.data["testTitles"]).toEqual([
+      "Checkout adds one item to the cart",
+      "Checkout logs in with valid credentials",
+      "Checkout shows the cart page",
+    ]);
+  });
+
+  it("ranks a close typo first", async () => {
+    const miss = await call("cypress_run", {
+      spec: "cypress/e2e/checkout.cy.js",
+      testName: "Checkout shows the kart page",
+    });
+    expect(miss.isError).toBe(true);
+    expect((miss.structured.data["closestMatches"] as string[])[0]).toBe(
+      "Checkout shows the cart page",
+    );
+    expect(miss.text).toContain('closest: "Checkout shows the cart page"');
+  });
+});
+
+describe("cypress_get_failure", () => {
+  it("shows each failure with the line from the stack, an excerpt and the diff", async () => {
+    const run = await call("cypress_run", { spec: "cypress/e2e/checkout.cy.js" });
+    const { text, structured } = await call("cypress_get_failure", {
+      runId: run.structured.runId,
+    });
+
+    expect(text).toContain(
+      `cypress/e2e/checkout.cy.js (runId ${run.structured.runId}): failures 1 to 2 of 2`,
+    );
+    expect(text).toContain("at cypress/e2e/checkout.cy.js:5:37");
+    expect(text).toContain(
+      ' >>> 5:     cy.get(\'[data-cy="cart-count"]\').should("have.text", "1");',
+    );
+    expect(text).toContain(" >>> 10:     cy.get('[data-cy=\"login-button\"]').click();");
+    const failures = structured.data["failures"] as { excerpt?: string }[];
+    expect(failures).toHaveLength(2);
+    expect(failures.every((f) => f.excerpt)).toBe(true);
+  });
+
+  it("keeps runs apart by runId, so parallel agents read their own run", async () => {
+    const [a, b] = await Promise.all([
+      call("cypress_run", { spec: "cypress/e2e/checkout.cy.js" }),
+      call("cypress_run", { spec: "cypress/e2e/pass.cy.js" }),
+    ]);
+    expect(a.structured.runId).not.toBe(b.structured.runId);
+
+    const ofA = await call("cypress_get_failure", { runId: a.structured.runId });
+    const ofB = await call("cypress_get_failure", { runId: b.structured.runId });
+    expect(ofA.structured.data["spec"]).toBe("cypress/e2e/checkout.cy.js");
+    expect(ofB.structured.data["spec"]).toBe("cypress/e2e/pass.cy.js");
+    expect(ofB.text).toContain("no failures");
+  });
+
+  it("shows one failure, every test, the screenshots or the output on request", async () => {
+    const run = await call("cypress_run", { spec: "cypress/e2e/checkout.cy.js" });
+    const runId = run.structured.runId;
+
+    const second = await call("cypress_get_failure", { runId, failure: 2 });
+    expect(second.text).toContain("failure 2 of 2");
+    expect(second.text).not.toContain("1) Checkout adds one item");
+
+    const tests = await call("cypress_get_failure", { runId, view: "tests" });
+    expect(tests.text.split("\n").slice(2)).toEqual([
+      "FAIL Checkout adds one item to the cart (10ms)",
+      "FAIL Checkout logs in with valid credentials (10ms)",
+      "ok   Checkout shows the cart page (10ms)",
+    ]);
+
+    const output = await call("cypress_get_failure", { runId, view: "output" });
+    expect(output.text).toContain("--- stdout");
+    expect(output.text).toContain("(Run Finished)");
+
+    const shots = await call("cypress_get_failure", { runId, view: "screenshots" });
+    expect(shots.structured.data["screenshots"]).toEqual([]);
+  });
+
+  it("fails with the stored runIds for an unknown runId", async () => {
+    const { isError, text, structured } = await call("cypress_get_failure", {
+      runId: "run_999",
+    });
+
+    expect(isError).toBe(true);
+    expect(text).toMatch(
+      /^Error RUN_NOT_FOUND: Unknown runId "run_999"\. Stored runs, newest first: run_\d+/,
+    );
+    expect(structured.data).toMatchObject({ code: "RUN_NOT_FOUND" });
+  });
+
+  it("rejects a failure number the run does not have", async () => {
+    const run = await call("cypress_run", { spec: "cypress/e2e/pass.cy.js" });
+    const { isError, structured } = await call("cypress_get_failure", {
+      runId: run.structured.runId,
+      failure: 3,
+    });
+    expect(isError).toBe(true);
+    expect(structured.data["code"]).toBe("INVALID_ARGUMENT");
+  });
+});
+
+describe("progress, cancellation and timeouts (B2)", () => {
   it("kills the whole Cypress process tree when the request is cancelled", async () => {
     const controller = new AbortController();
     const cancelled = call(
-      "cypress_run_spec",
+      "cypress_run",
       { spec: "cypress/e2e/hang.cy.js" },
       {
         signal: controller.signal,
@@ -189,58 +393,39 @@ describe("progress, cancellation and timeouts (B2)", () => {
 
     // The queue is free: the next run starts at once instead of waiting.
     const started = Date.now();
-    const next = await call("cypress_run_spec", { spec: "cypress/e2e/pass.cy.js" });
-    expect(next.body.ok).toBe(true);
+    const next = await call("cypress_run", { spec: "cypress/e2e/pass.cy.js" });
+    expect(next.structured.data["status"]).toBe("passed");
     expect(Date.now() - started).toBeLessThan(10_000);
   }, 30_000);
 
   it("keeps the partial run and names the test that hung on timeout", async () => {
-    const { isError, body } = await call("cypress_run_spec", {
+    const { isError, text, structured } = await call("cypress_run", {
       spec: "cypress/e2e/hang.cy.js",
       timeout: 2_000,
     });
 
     expect(isError).toBe(true);
-    expect(body.data["code"]).toBe("TIMEOUT");
-    expect(body.data["runningTest"]).toBe("Hang never ends");
-    expect(body.summary).toContain('while running "Hang never ends"');
-    expect(body.data["tests"]).toMatchObject([
-      { fullTitle: "Hang finishes", state: "passed" },
-    ]);
+    expect(text.split("\n")[0]).toBe(
+      `TIMEOUT cypress/e2e/hang.cy.js: stopped after 2.0s while running "Hang never ends"; 1 passed before it (runId ${structured.runId})`,
+    );
+    expect(structured.data).toMatchObject({
+      status: "timeout",
+      runningTest: "Hang never ends",
+      tests: [{ fullTitle: "Hang finishes", state: "passed" }],
+    });
 
     const pids = JSON.parse(fs.readFileSync(pidFile, "utf-8")) as number[];
     expect(await waitFor(() => pids.every((pid) => !alive(pid)), 10_000)).toBe(true);
 
-    // Recorded like any run, so the agent can inspect and replay it.
-    const last = await call("cypress_get_last_run");
-    expect(JSON.stringify(last.body)).toContain("Hang never ends");
+    // Recorded like any run, so the agent can inspect it.
+    const details = await call("cypress_get_failure", { runId: structured.runId });
+    expect(details.text).toContain('running when stopped: "Hang never ends"');
   }, 30_000);
-});
-
-describe("cypress_get_failure_context (B3)", () => {
-  it("marks the line from the stack and gives every failure an excerpt", async () => {
-    await call("cypress_run_spec", { spec: "cypress/e2e/checkout.cy.js" });
-    const { body } = await call("cypress_get_failure_context");
-    const failures = body.data["failures"] as {
-      location?: string;
-      specExcerpt?: string;
-    }[];
-
-    expect(failures).toHaveLength(2);
-    expect(failures[0]?.location).toBe("cypress/e2e/checkout.cy.js:5:37");
-    expect(failures[0]?.specExcerpt).toContain(
-      ">>> 5:     cy.get('[data-cy=\"cart-count\"]')",
-    );
-    expect(failures[1]?.location).toBe("cypress/e2e/checkout.cy.js:10:7");
-    expect(failures[1]?.specExcerpt).toContain(
-      ">>> 10:     cy.get('[data-cy=\"login-button\"]').click();",
-    );
-  });
 });
 
 describe("arguments passed to Cypress", () => {
   it("omits --browser unless the caller asks for one (B6)", async () => {
-    await call("cypress_run_spec", { spec: "cypress/e2e/pass.cy.js" });
+    await call("cypress_run", { spec: "cypress/e2e/pass.cy.js" });
     const [args] = runs();
 
     expect(args).toBeDefined();
@@ -248,7 +433,7 @@ describe("arguments passed to Cypress", () => {
   });
 
   it("passes the shipped reporter instead of the json reporter", async () => {
-    await call("cypress_run_spec", { spec: "cypress/e2e/pass.cy.js" });
+    await call("cypress_run", { spec: "cypress/e2e/pass.cy.js" });
     const [args] = runs();
     const reporter = args![args!.indexOf("--reporter") + 1]!;
 
@@ -259,34 +444,31 @@ describe("arguments passed to Cypress", () => {
 
   it("rejects a path as browser without starting Cypress (B8)", async () => {
     const script = path.join(root, "fakebrowser.sh");
-    const { isError, body } = await call("cypress_run_spec", {
+    const { isError, text, structured } = await call("cypress_run", {
       spec: "cypress/e2e/pass.cy.js",
       browser: script,
     });
 
     expect(isError).toBe(true);
-    expect(body.data["code"]).toBe("INVALID_ARGUMENT");
-    expect(body.summary).toContain("Paths are not accepted");
+    expect(structured.data["code"]).toBe("INVALID_ARGUMENT");
+    expect(text).toContain("Paths are not accepted");
     expect(runs()).toEqual([]);
   });
 
   it("accepts only browsers that cypress info lists (B8)", async () => {
-    const unknown = await call("cypress_run_spec", {
+    const unknown = await call("cypress_run", {
       spec: "cypress/e2e/pass.cy.js",
       browser: "safari",
     });
     expect(unknown.isError).toBe(true);
-    expect(unknown.body.summary).toContain(
+    expect(unknown.text).toContain(
       "chrome, chrome:stable, electron, firefox, firefox:dev",
     );
     expect(runs()).toEqual([]);
 
     for (const browser of ["chrome", "firefox:dev", "electron"]) {
-      const ok = await call("cypress_run_spec", {
-        spec: "cypress/e2e/pass.cy.js",
-        browser,
-      });
-      expect(ok.body.ok, browser).toBe(true);
+      const ok = await call("cypress_run", { spec: "cypress/e2e/pass.cy.js", browser });
+      expect(ok.structured.data["status"], browser).toBe("passed");
     }
     expect(runs().map((args) => args[args.indexOf("--browser") + 1])).toEqual([
       "chrome",
@@ -294,43 +476,93 @@ describe("arguments passed to Cypress", () => {
       "electron",
     ]);
   });
+
+  it("checks Cloud fields before starting Cypress", async () => {
+    const { isError, structured } = await call("cypress_run", {
+      spec: "cypress/e2e/pass.cy.js",
+      record: true,
+      tags: ["a,b"],
+    });
+    expect(isError).toBe(true);
+    expect(structured.data["code"]).toBe("INVALID_ARGUMENT");
+    expect(runs()).toEqual([]);
+  });
+});
+
+describe("errors", () => {
+  it("returns isError and the envelope for every error, with no doctor by default", async () => {
+    const cases: [string, Record<string, unknown>, string][] = [
+      ["cypress_run", { spec: "cypress/e2e/nope.cy.js" }, "SPEC_NOT_FOUND"],
+      ["cypress_run", { spec: "../outside.cy.js" }, "SPEC_OUTSIDE_PROJECT"],
+      ["cypress_list_specs", { pattern: "+(a|b)/**" }, "INVALID_ARGUMENT"],
+      ["cypress_analyze_spec", { spec: "cypress/e2e/nope.cy.js" }, "SPEC_NOT_FOUND"],
+    ];
+    for (const [tool, args, code] of cases) {
+      const { isError, text, structured } = await call(tool, args);
+      expect(isError, tool).toBe(true);
+      expect(text.startsWith(`Error ${code}: `), text).toBe(true);
+      expect(structured).toMatchObject({ ok: false, tool, data: { code } });
+      expect(structured.nextActions.join(" ")).not.toContain("cypress_doctor");
+    }
+  });
+
+  it("rejects arguments that do not match the input schema with isError", async () => {
+    const result = await client.callTool({
+      name: "cypress_run",
+      arguments: { specFile: "cypress/e2e/pass.cy.js" },
+    });
+    expect(result.isError).toBe(true);
+  });
 });
 
 describe("discovery tools agree (B5)", () => {
-  it("counts the same tests in discover, list_specs and analyze_spec", async () => {
-    const discover = await call("cypress_discover");
-    const specs = (discover.body.data["specs"] as { file: string; tests: number }[]).sort(
-      (a, b) => a.file.localeCompare(b.file),
-    );
+  it("counts the same tests in list_specs, analyze_spec and the legacy discover", async () => {
+    const list = await call("cypress_list_specs");
+    const specs = list.structured.data["specs"] as { file: string; tests: number }[];
     expect(specs.map((s) => [s.file, s.tests])).toEqual([
+      ["cypress/e2e/broken.cy.js", 1],
       ["cypress/e2e/checkout.cy.js", 3],
+      ["cypress/e2e/flaky.cy.js", 1],
       ["cypress/e2e/hang.cy.js", 2],
       ["cypress/e2e/pass.cy.js", 1],
+      ["cypress/e2e/support.cy.js", 1],
     ]);
+    expect(list.text.split("\n")[2]).toBe("cypress/e2e/checkout.cy.js: 3");
 
-    const list = await client.callTool({ name: "cypress_list_specs", arguments: {} });
-    const listed = JSON.parse((list.content as { text: string }[])[0]!.text) as {
-      specs: { file: string; tests: number }[];
-    };
-    expect(listed.specs).toEqual(specs.map(({ file, tests }) => ({ file, tests })));
-
-    const analyze = await client.callTool({
-      name: "cypress_analyze_spec",
-      arguments: { spec: "cypress/e2e/checkout.cy.js" },
+    const titled = await call("cypress_list_specs", {
+      pattern: "cypress/e2e/checkout.cy.js",
+      titles: true,
     });
-    const analysis = JSON.parse((analyze.content as { text: string }[])[0]!.text) as {
-      structure: {
-        describes: { name: string; hooks: string[]; tests: { name: string }[] }[];
-      };
-    };
-    expect(analysis.structure.describes).toMatchObject([
-      { name: "Checkout", hooks: ["beforeEach"] },
+    expect(titled.text.split("\n").slice(1)).toEqual([
+      "cypress/e2e/checkout.cy.js: 3",
+      "  Checkout adds one item to the cart",
+      "  Checkout logs in with valid credentials",
+      "  Checkout shows the cart page",
     ]);
-    expect(analysis.structure.describes[0]?.tests.map((t) => t.name)).toEqual([
-      "adds one item to the cart",
-      "logs in with valid credentials",
-      "shows the cart page",
+
+    const discover = await callLegacy("cypress_discover");
+    expect(
+      (discover.body.data["specs"] as { file: string; tests: number }[]).map((s) => [
+        s.file,
+        s.tests,
+      ]),
+    ).toEqual(specs.map((s) => [s.file, s.tests]));
+
+    const analyze = await call("cypress_analyze_spec", {
+      spec: "cypress/e2e/checkout.cy.js",
+    });
+    expect(analyze.text.split("\n")).toEqual([
+      "cypress/e2e/checkout.cy.js: 3 test(s)",
+      '1: describe "Checkout" hooks: beforeEach',
+      '  3: it "adds one item to the cart"',
+      '  7: it "logs in with valid credentials"',
+      '  13: it "shows the cart page"',
+      "visits: app/index.html",
     ]);
+    expect(analyze.structured.data).toMatchObject({
+      file: "cypress/e2e/checkout.cy.js",
+      structure: { describes: [{ name: "Checkout", hooks: ["beforeEach"] }] },
+    });
   });
 });
 
@@ -344,20 +576,72 @@ describe("cypress_get_env (B7)", () => {
         retries: 2,
       }),
     );
-    const result = await client.callTool({ name: "cypress_get_env", arguments: {} });
-    const text = (result.content as { text: string }[])[0]!.text;
+    const { text, structured } = await call("cypress_get_env");
 
-    expect(JSON.parse(text).data.env).toEqual({
+    expect(structured.data["env"]).toEqual({
       adminPass: "string",
       baseUrl: "string",
       retries: "number",
     });
-    expect(text).not.toMatch(/hunter2|p4ssw0rd|alice/);
+    expect(text + JSON.stringify(structured)).not.toMatch(/hunter2|p4ssw0rd|alice/);
+    fs.rmSync(path.join(root, "cypress.env.json"));
 
-    const tools = await client.listTools();
-    const description = tools.tools.find(
-      (t) => t.name === "cypress_get_env",
-    )?.description;
-    expect(description).not.toContain("Safe to display");
+    const none = await call("cypress_get_env");
+    expect(none.isError).toBe(false);
+    expect(none.structured.data["exists"]).toBe(false);
+  });
+});
+
+describe("legacy tool names (--caps legacy)", () => {
+  it("keep the 0.2 JSON envelope and say they are deprecated", async () => {
+    const { tools } = await client.listTools();
+    const runSpec = tools.find((t) => t.name === "cypress_run_spec");
+    expect(runSpec?.description).toMatch(
+      /^Deprecated, removed in 0\.4: use cypress_run\./,
+    );
+
+    const run = await callLegacy("cypress_run_spec", {
+      spec: "cypress/e2e/checkout.cy.js",
+    });
+    expect(run.body).toMatchObject({
+      ok: true,
+      tool: "cypress_run_spec",
+      summary: "2 failing, 1 passing in cypress/e2e/checkout.cy.js",
+      nextActions: ["cypress_get_failure_context", "cypress_get_screenshot"],
+    });
+
+    const context = await callLegacy("cypress_get_failure_context", {
+      runId: run.body.runId,
+    });
+    const failures = context.body.data["failures"] as {
+      location?: string;
+      specExcerpt?: string;
+    }[];
+    expect(failures[0]?.location).toBe("cypress/e2e/checkout.cy.js:5:37");
+    expect(failures[1]?.specExcerpt).toContain(
+      ">>> 10:     cy.get('[data-cy=\"login-button\"]').click();",
+    );
+
+    const rerun = await callLegacy("cypress_rerun_last", { runId: run.body.runId });
+    expect(rerun.body.previousRunId).toBe(run.body.runId);
+
+    const last = await callLegacy("cypress_get_last_run", { runId: run.body.runId });
+    expect(last.body.data["spec"]).toBe("cypress/e2e/checkout.cy.js");
+
+    const miss = await callLegacy("cypress_run_test", {
+      spec: "cypress/e2e/checkout.cy.js",
+      testName: "does not exist anywhere",
+    });
+    expect(miss.isError).toBe(true);
+    expect(miss.body.data["code"]).toBe("NO_TEST_MATCHED");
+  });
+
+  it("report a spec that does not compile with isError now", async () => {
+    const broken = await callLegacy("cypress_run_spec", {
+      spec: "cypress/e2e/broken.cy.js",
+    });
+    expect(broken.isError).toBe(true);
+    expect(broken.body.ok).toBe(false);
+    expect(broken.body.data["errorKind"]).toBe("compile");
   });
 });

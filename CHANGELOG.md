@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.3.0 (unreleased)
+
+Built for agents: one call returns a compact failure the agent can fix, a smaller tool list, a `runId` on every result, and a fast `npx` start. Measured with the 0.2.1 review harness against 0.2.2 (o200k tokens): a 150 test spec with 15 failures went from 15,910 tokens (52,660 characters) to 1,055 (3,229 characters); a run with 2 failures from 1,275 to 217; a passing run from 325 to 26; the tool list from 1,598 tokens for 12 tools to 739 for 4.
+
+### Breaking changes
+
+- The default tool set is `cypress_run`, `cypress_get_failure`, `cypress_list_specs` and `cypress_doctor`. The other tools are opt-in with `--caps` (or `CYPRESS_MCP_CAPS`): `analyze` (`cypress_analyze_spec`), `config` (`cypress_get_config`, `cypress_get_env`), `legacy` (the 0.2 names below), `all`.
+- The 0.2 names `cypress_run_spec`, `cypress_run_test`, `cypress_rerun_last`, `cypress_get_last_run`, `cypress_get_failure_context`, `cypress_get_screenshot` and `cypress_discover` work with `--caps legacy` until 0.4, with their 0.2 input schemas and JSON text, and a deprecation note in their description. The README maps each one to its replacement.
+- `cypress_list_specs`, `cypress_doctor`, `cypress_analyze_spec`, `cypress_get_config` and `cypress_get_env` answer in compact text, with their data in `structuredContent`. Their input schemas still accept 0.2 arguments.
+
+### Agent output
+
+- `cypress_run` runs a spec, or one test with `testName`. The text has a status line (`PASS`, `FAIL`, `ERROR`, `TIMEOUT`, `NO MATCH`) with the counts and the `runId`, then per failure its full title, `file:line:col`, the error class and message (three lines at most) and the screenshot path. Passing tests are omitted unless `verbose: true`; flaky tests are always named. The full result is in `structuredContent`.
+- `cypress_get_failure {runId, view}` replaces `cypress_get_last_run`, `cypress_get_failure_context` and `cypress_get_screenshot`: `failures` (default) gives each failure with a source excerpt, the diff and the stack frames, `failure` picks one; `tests`, `screenshots` and `output` show every test, the image paths that still exist, and the end of Cypress's output.
+- `cypress_list_specs {titles: true}` replaces `cypress_discover`: each spec with its tests' full titles, the text `testName` matches.
+- `cypress_doctor {quick: true}` checks files and the install without starting Cypress.
+- A failure in a support file or page object points at that file instead of the spec.
+- Every tool has a `title` and annotations (read tools `readOnlyHint: true`; run tools `destructiveHint: false`, `idempotentHint: false`, `openWorldHint: true`), and the default tools an `outputSchema`.
+- The server sends five lines of `instructions` at startup. `skill/SKILL.md` quotes them and no longer sends agents to `cypress_doctor` every session or to `cypress_discover` after a pass, no longer assumes a tool that reads images, and asks the agent to decide whether the app or the test is wrong instead of always fixing the code.
+- Text results never exceed 40,000 characters, under Claude Code's 50,000 character inline limit. A run lists its first 30 failures; `cypress_get_failure` pages through the rest.
+
+### runId
+
+- Every run returns a `runId`, and every read tool takes one, the legacy ones included (`cypress_rerun_last` too). The server keeps the latest 50 runs. `"last"` stays accepted as an explicit default; it is the latest run of the server, which is another agent's when subagents share it. An unknown `runId` fails with `RUN_NOT_FOUND` and the stored ids.
+
+### Errors
+
+- Every error is a tool result with `isError: true` and the same envelope: `ok: false`, `tool`, `summary`, `data.code`, `data.error`, `nextActions`. A run that never produced a report (compile error, timeout, Cypress crash) and a `testName` that matches nothing now set `isError`, in the legacy tools too.
+- `cypress_list_specs` and `cypress_analyze_spec` use the envelope. Unexpected exceptions become `INTERNAL_ERROR` results instead of protocol errors. Arguments that do not match the input schema are rejected by the SDK with `isError` and the validation message.
+- Next actions no longer default to `cypress_doctor` (it starts Cypress, about 15 s). Only a Cypress crash with no known cause suggests it, after the run's output. A missing `cypress.env.json` is no longer an error.
+- `listChanged` is no longer advertised: the tool list never changes during a session.
+- Cloud fields are checked before Cypress starts: at most 20 tags of 1 to 100 characters without commas, `group` and `ciBuildId` of 1 to 200 characters.
+- Progress notifications are flushed before the result, so a client sees all of them when tests finish quickly.
+
+### CLI
+
+- `npx cypress-mcp run <spec> [--test <name>] [--verbose] [--json] [--browser <name>] [--headed] [--timeout <ms>] [--env key=value] [--cwd <dir>]` prints the same text as `cypress_run`. Exit code 0 when everything passed, 1 when a test failed or the run did not complete, 2 for bad arguments or setup errors. `--help` and `--version` work too.
+
+### Package
+
+- Every dependency is bundled into `dist/index.js` with tsup, so `npx -y cypress-mcp` installs one package (1.7 MB) instead of 96 (27 MB) with the MCP SDK's unused HTTP stack. On the same machine, a cold `npx` start to `tools/list` takes 1.3 to 2.9 s instead of 5.0 to 6.1 s; a warm start stays about 1 to 2 s, mostly npx itself. The licenses of the bundled packages ship in `dist/THIRD_PARTY_NOTICES.md`.
+- Moved to the MCP TypeScript SDK v2 (`@modelcontextprotocol/server` 2.4), which implements spec 2026-07-28. The server answers 2025 clients through `initialize` and 2026-07-28 clients through per-request metadata and `server/discover`, from the same process.
+- `scripts/audit-prod.mjs` audits the packages inside the bundle (read from the build's metafile), since they are devDependencies now.
+- `server.json` declares the `--caps` argument.
+
+### CI
+
+- The CI, E2E and CodeQL workflows pin their actions to commit SHAs with version comments, and grant permissions per job (`contents: read`; CodeQL also `security-events: write`).
+- The E2E smoke test drives the new tools, the legacy names and the CLI against a real Cypress.
+
 ## 0.2.2 (unreleased)
 
 Fixes for problems agents hit in 0.2.1, and setup docs for every major MCP client.

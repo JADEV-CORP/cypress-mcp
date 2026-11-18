@@ -53,13 +53,13 @@ describe("run-results helpers", () => {
     expect(summary).toContain("failed before tests executed");
   });
 
-  it("should suggest doctor for process-level failures", () => {
+  it("should point unexplained crashes at the output, then the doctor", () => {
     const nextActions = buildRunNextActions({
       ...baseResult,
       error: "Config invalid",
     });
 
-    expect(nextActions).toEqual(["cypress_doctor", "cypress_get_last_run"]);
+    expect(nextActions).toEqual(["cypress_get_last_run", "cypress_doctor"]);
   });
 
   it("should mention flaky tests in the summary", () => {

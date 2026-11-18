@@ -138,12 +138,44 @@ export class RecordKeyMissingError extends CypressMcpError {
   }
 }
 
+export class RunNotFoundError extends CypressMcpError {
+  constructor(runId: string, knownRunIds: readonly string[]) {
+    super(
+      runId === "last"
+        ? "No run yet in this server session."
+        : `Unknown runId "${runId}". ${
+            knownRunIds.length > 0
+              ? `Stored runs, newest first: ${knownRunIds.slice(0, 10).join(", ")}.`
+              : "No run is stored: the server may have restarted."
+          }`,
+      "RUN_NOT_FOUND",
+      "Start a run with cypress_run and pass the runId it returns.",
+    );
+    this.name = "RunNotFoundError";
+  }
+}
+
+/**
+ * Wraps an error the server did not expect, so the agent still gets a tool
+ * result with isError instead of a protocol error.
+ */
+export class InternalError extends CypressMcpError {
+  constructor(cause: unknown) {
+    super(
+      `cypress-mcp failed unexpectedly: ${cause instanceof Error ? cause.message : String(cause)}`,
+      "INTERNAL_ERROR",
+      "Retry the call. If it keeps failing, report it with the server's stderr log.",
+    );
+    this.name = "InternalError";
+  }
+}
+
 export class TitleFilterUnavailableError extends CypressMcpError {
   constructor() {
     super(
-      "cypress_run_test requires grep-based title filtering to be configured in the Cypress project.",
+      "Running a single test by name needs @cypress/grep (or an equivalent grep plugin) in the Cypress project.",
       "TITLE_FILTER_UNAVAILABLE",
-      "Wire @cypress/grep (or an equivalent grep plugin) into the project, or set titleFilterSupport: true in cypress-mcp.config.json if filtering is already configured.",
+      "Run the whole spec, wire @cypress/grep into the project, or set titleFilterSupport: true in cypress-mcp.config.json if filtering is already configured.",
     );
     this.name = "TitleFilterUnavailableError";
   }
