@@ -229,7 +229,9 @@ async function runtimeChecks(
         {
           spec: "__cypress_mcp_config_check__.cy.ts",
           browser: config.defaultBrowser,
-          timeout: Math.min(config.defaultTimeout, 30_000),
+          // A first launch on a fresh machine verifies the binary and starts a display, which can
+          // take most of a minute on Linux; a shorter bound reports a false fallback there.
+          timeout: Math.min(config.defaultTimeout, 90_000),
           configFile: config.cypressConfigFile,
         },
         { workspace },
