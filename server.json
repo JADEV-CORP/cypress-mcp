@@ -36,7 +36,7 @@
       "environmentVariables": [
         {
           "name": "CYPRESS_RECORD_KEY",
-          "description": "Cypress Cloud record key. Only needed to record runs with record: true; never passed through the agent.",
+          "description": "Cypress Cloud record key. Only needed to record runs with cloud: {record: true}; never passed through the agent.",
           "format": "string",
           "isRequired": false,
           "isSecret": true

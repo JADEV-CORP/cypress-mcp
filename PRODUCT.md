@@ -16,7 +16,7 @@ The agent calls tools; cypress-mcp starts Cypress with the project's own config,
 | `--caps analyze` | `cypress_analyze_spec` |
 | `--caps config` | `cypress_get_config`, `cypress_get_env` |
 
-Runs report progress per test to clients that ask for it, stop when the client cancels the request, and keep their partial results when they hit the timeout. Runs can be recorded to Cypress Cloud (`record: true`); the result carries the Cloud run URL that Cypress Cloud MCP tools accept. No tool name overlaps with Cypress Cloud MCP, so agents can load both.
+Runs report progress per test to clients that ask for it, stop when the client cancels the request, and keep their partial results when they hit the timeout. Runs can be recorded to Cypress Cloud (`cloud: {record: true}`); the result carries the Cloud run URL that Cypress Cloud MCP tools accept. No tool name overlaps with Cypress Cloud MCP, so agents can load both.
 
 ## How it works
 

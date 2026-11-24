@@ -388,7 +388,7 @@ Each run gets a `runId` (`run_1`, `run_2`, ...), kept in memory for the life of 
 
 ### Upgrading
 
-From 0.4 to 0.5: the 0.2 tool names and the `--caps legacy` group are removed. A client that still passes `--caps legacy` gets the default tools, and the server log warns that the group is gone. The table below maps each 0.2 name to the tool that replaced it.
+From 0.4 to 0.5: `cypress_run` takes the Cloud options in one object, `cloud: {record: true, tags, group, ciBuildId}`, instead of four top-level arguments. A call that still sends `record` at the top level fails with a message that points at `cloud: {record: true}`. The 0.2 tool names and the `--caps legacy` group are removed. A client that still passes `--caps legacy` gets the default tools, and the server log warns that the group is gone. The table below maps each 0.2 name to the tool that replaced it.
 
 From 0.4.0 to 0.4.1: the failure list of a run sits in one `<page data ...>` fence, not only the page context; `cypress_run` rejects unknown arguments and runs every spec without `spec`; a skipped test that matches is status `skipped`, not `no_match`; a non-zero Cypress exit with no failure is an error, not a pass.
 
@@ -451,7 +451,7 @@ With [test retries](https://docs.cypress.io/app/guides/test-retries) enabled, ev
 
 cypress-mcp runs tests on your machine. [Cypress Cloud MCP](https://docs.cypress.io/cloud/integrations/cloud-mcp) reads results recorded in Cypress Cloud: run history, flaky test analytics, Test Replay, UI Coverage and Accessibility. They do different jobs and work well together. No tool names overlap, so an agent can load both.
 
-**Record a local run.** Pass `record: true` to `cypress_run`, with optional `tags`, `group` and `ciBuildId`. The text result has a `cloud:` line with the run URL, and `structuredContent` has:
+**Record a local run.** Pass `cloud: {record: true}` to `cypress_run`, with optional `tags`, `group` and `ciBuildId` in the same object: `cloud: {record: true, tags: ["local"], group: "smoke"}`. The text result has a `cloud:` line with the run URL, and `structuredContent` has:
 
 ```json
 "cloud": {

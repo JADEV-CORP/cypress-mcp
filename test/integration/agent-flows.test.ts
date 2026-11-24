@@ -636,11 +636,33 @@ describe("arguments passed to Cypress", () => {
   it("checks Cloud fields before starting Cypress", async () => {
     const { isError, structured } = await call("cypress_run", {
       spec: "cypress/e2e/pass.cy.js",
-      record: true,
-      tags: ["a,b"],
+      cloud: { record: true, tags: ["a,b"] },
     });
     expect(isError).toBe(true);
     expect(structured.data["code"]).toBe("INVALID_ARGUMENT");
+    expect(structured.summary).toContain("cloud.tags");
+    expect(runs()).toEqual([]);
+  });
+
+  it("records through cloud, with the key from the server env only", async () => {
+    // The test server has no CYPRESS_RECORD_KEY, so the run stops before Cypress.
+    const { isError, structured } = await call("cypress_run", {
+      spec: "cypress/e2e/pass.cy.js",
+      cloud: { record: true },
+    });
+    expect(isError).toBe(true);
+    expect(structured.data["code"]).toBe("RECORD_KEY_MISSING");
+    expect(runs()).toEqual([]);
+  });
+
+  it("points a 0.4 top-level record at cloud: {record: true}", async () => {
+    const { isError, text } = await call("cypress_run", {
+      spec: "cypress/e2e/pass.cy.js",
+      record: true,
+    });
+    expect(isError).toBe(true);
+    expect(text).toContain('"record"');
+    expect(text).toContain("cloud: {record: true}");
     expect(runs()).toEqual([]);
   });
 });

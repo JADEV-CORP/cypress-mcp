@@ -10,10 +10,11 @@ import {
 } from "../services/failure-context.js";
 import { renderRun, runHeadline, runStatus, type RunStatus } from "../format/compact.js";
 import {
-  cloudOptionsShape,
+  cloudShape,
   prepareRun,
   progressNotifier,
   runOptionsShape,
+  unknownRunArguments,
 } from "./run-shared.js";
 import { screenshotLinks } from "./screenshots.js";
 import { displayPath } from "../services/projects.js";
@@ -125,6 +126,42 @@ export const runDataSchema = z.object({
 
 export type RunData = z.infer<typeof runDataSchema>;
 
+/**
+ * Arguments of cypress_run. Strict: a misspelled spec (specFile, specs) must
+ * not run every spec, and the 0.4 Cloud fields get a message naming cloud.
+ */
+export const runInputSchema = z.strictObject(
+  {
+    spec: z
+      .union([z.string().min(1), z.array(z.string().min(1)).min(1).max(100)])
+      .optional()
+      .describe(
+        'Spec path, "path:line" for the test at that line, a glob such as cypress/e2e/**/*.cy.ts, or a list. Omit for every spec',
+      ),
+    testName: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Only tests whose full title contains this"),
+    repeat: z
+      .number()
+      .int()
+      .min(1)
+      .max(50)
+      .optional()
+      .describe("Run the selected tests n times, to prove a flaky fix"),
+    component: z.boolean().optional().describe("Component tests"),
+    project: z
+      .string()
+      .optional()
+      .describe("Monorepos: folder with cypress.config.* (default: from the spec path)"),
+    verbose: z.boolean().optional().describe("Also list passing tests"),
+    ...runOptionsShape,
+    ...cloudShape,
+  },
+  { error: unknownRunArguments },
+);
+
 export function register(server: McpServer, ctx: ToolContext): void {
   server.registerTool(
     TOOL,
@@ -132,37 +169,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
       title: "Run Cypress specs",
       description:
         "Run Cypress headless in one launch: a spec, path:line, a glob or a list. Returns per failure file:line, error, screenshot and the page at the failure (URL, console and network errors, similar selectors), plus a runId.",
-      // Strict: a misspelled spec (specFile, specs) must not run every spec.
-      inputSchema: z.strictObject({
-        spec: z
-          .union([z.string().min(1), z.array(z.string().min(1)).min(1).max(100)])
-          .optional()
-          .describe(
-            'Spec path, "path:line" for the test at that line, a glob such as cypress/e2e/**/*.cy.ts, or a list. Omit for every spec',
-          ),
-        testName: z
-          .string()
-          .min(1)
-          .optional()
-          .describe("Only tests whose full title contains this"),
-        repeat: z
-          .number()
-          .int()
-          .min(1)
-          .max(50)
-          .optional()
-          .describe("Run the selected tests n times, to prove a flaky fix"),
-        component: z.boolean().optional().describe("Component tests"),
-        project: z
-          .string()
-          .optional()
-          .describe(
-            "Monorepos: folder with cypress.config.* (default: from the spec path)",
-          ),
-        verbose: z.boolean().optional().describe("Also list passing tests"),
-        ...runOptionsShape,
-        ...cloudOptionsShape,
-      }),
+      inputSchema: runInputSchema,
       outputSchema: envelopeSchema(runDataSchema),
       annotations: RUNS_CYPRESS,
     },

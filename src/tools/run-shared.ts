@@ -10,10 +10,10 @@ import { allSpecTargets, resolveTargets } from "../services/targets.js";
 import { displayPath } from "../services/projects.js";
 
 // Descriptions and constraints are kept short: every tool definition is sent
-// to the model, and this shape is in each run tool. Limits that only guard
-// against nonsense (tag lengths, ids) are checked in validateCloud instead.
+// to the model in every session. Limits that only guard against nonsense (tag
+// lengths, ids) are checked in validateRunInput instead.
 
-/** Input fields shared by every tool that starts a Cypress run. */
+/** Run options of cypress_run, also set by the CLI's flags. */
 export const runOptionsShape = {
   browser: z
     .string()
@@ -33,20 +33,44 @@ export const runOptionsShape = {
 };
 
 /**
- * Cypress Cloud recording. The record key never appears here: Cypress reads
- * CYPRESS_RECORD_KEY from the server environment.
+ * Cypress Cloud recording, in one object: agents rarely record, so the tool
+ * definition lists one optional argument instead of four. The record key
+ * never appears here: Cypress reads CYPRESS_RECORD_KEY from the server
+ * environment. Strict, so a typo such as `recod` fails instead of silently
+ * not recording.
  */
-export const cloudOptionsShape = {
-  record: z
-    .boolean()
+export const cloudShape = {
+  cloud: z
+    .strictObject({
+      record: z.boolean().optional(),
+      tags: z.array(z.string()).optional(),
+      group: z.string().optional(),
+      ciBuildId: z.string().optional(),
+    })
     .optional()
     .describe(
-      "Record to Cypress Cloud (needs projectId and CYPRESS_RECORD_KEY in the server env)",
+      "Cypress Cloud: record: true needs projectId and CYPRESS_RECORD_KEY in the server env",
     ),
-  tags: z.array(z.string()).optional().describe("Cloud run tags"),
-  group: z.string().optional().describe("Cloud run group"),
-  ciBuildId: z.string().optional().describe("Cloud build id"),
 };
+
+export type CloudInput = NonNullable<z.infer<typeof cloudShape.cloud>>;
+
+/** The fields cypress_run took at the top level before 0.5. */
+const MOVED_TO_CLOUD = new Set(["record", "tags", "group", "ciBuildId"]);
+
+/**
+ * Message for unknown cypress_run arguments. A caller written for 0.4 sends
+ * the Cloud fields at the top level and the description no longer names
+ * them, so say where they went. Undefined keeps zod's own message. The SDK
+ * puts this text in the tool error the agent reads.
+ */
+export function unknownRunArguments(issue: z.core.$ZodRawIssue): string | undefined {
+  if (issue.code !== "unrecognized_keys") return undefined;
+  const { keys } = issue;
+  if (!keys.some((key) => MOVED_TO_CLOUD.has(key))) return undefined;
+  const list = keys.map((key) => JSON.stringify(key)).join(", ");
+  return `Unrecognized key${keys.length > 1 ? "s" : ""}: ${list}. Cloud options moved in 0.5: pass cloud: {record: true}, with tags, group and ciBuildId inside cloud too.`;
+}
 
 const MAX_TAGS = 20;
 const MAX_TAG_LENGTH = 100;
@@ -67,20 +91,21 @@ function validateRunInput(input: RunInput): void {
       throw new InvalidArgumentError("env keys must not be empty.");
     }
   }
-  const tags = input.tags ?? [];
+  const cloud = input.cloud ?? {};
+  const tags = cloud.tags ?? [];
   if (tags.length > MAX_TAGS) {
-    throw new InvalidArgumentError(`At most ${MAX_TAGS} tags, got ${tags.length}.`);
+    throw new InvalidArgumentError(`At most ${MAX_TAGS} cloud.tags, got ${tags.length}.`);
   }
   for (const tag of tags) {
     if (tag.trim() === "" || tag.includes(",") || tag.length > MAX_TAG_LENGTH) {
       throw new InvalidArgumentError(
-        `Tags must be 1 to ${MAX_TAG_LENGTH} characters without commas: ${JSON.stringify(tag)}`,
+        `cloud.tags must be 1 to ${MAX_TAG_LENGTH} characters without commas: ${JSON.stringify(tag)}`,
       );
     }
   }
   for (const [name, value] of [
-    ["group", input.group],
-    ["ciBuildId", input.ciBuildId],
+    ["cloud.group", cloud.group],
+    ["cloud.ciBuildId", cloud.ciBuildId],
   ] as const) {
     if (
       value !== undefined &&
@@ -105,10 +130,8 @@ export interface RunInput {
   headed?: boolean;
   timeout?: number;
   env?: Record<string, string>;
-  record?: boolean;
-  tags?: string[];
-  group?: string;
-  ciBuildId?: string;
+  /** Cypress Cloud recording; the CLI has no Cloud flags */
+  cloud?: CloudInput;
 }
 
 /** A prepared run: the project it belongs to and the arguments for Cypress. */
@@ -125,20 +148,16 @@ export interface PreparedRun {
 
 export const MAX_REPEAT = 50;
 
-export function toCloudArgs(input: {
-  record?: boolean;
-  tags?: string[];
-  group?: string;
-  ciBuildId?: string;
-}): CloudRecordArgs | undefined {
-  if (!input.record) {
+/** Cloud arguments for `cypress run`; without record: true the rest is ignored. */
+export function toCloudArgs(cloud: CloudInput | undefined): CloudRecordArgs | undefined {
+  if (!cloud?.record) {
     return undefined;
   }
   return {
     record: true,
-    tags: input.tags,
-    group: input.group,
-    ciBuildId: input.ciBuildId,
+    tags: cloud.tags,
+    group: cloud.group,
+    ciBuildId: cloud.ciBuildId,
   };
 }
 
@@ -200,7 +219,7 @@ export async function prepareRun(
       ...(input.repeat !== undefined && input.repeat > 1 ? { repeat: input.repeat } : {}),
       ...(input.component ? { component: true } : {}),
       configFile: config.cypressConfigFile,
-      cloud: toCloudArgs(input),
+      cloud: toCloudArgs(input.cloud),
     },
     ...(targets.notes ? { notes: targets.notes } : {}),
   };

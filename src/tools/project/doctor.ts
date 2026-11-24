@@ -407,7 +407,7 @@ export function cloudCheck(
     return {
       check,
       status: "warn",
-      detail: `projectId ${projectId} found, but CYPRESS_RECORD_KEY is not set in the server environment, so record: true will fail`,
+      detail: `projectId ${projectId} found, but CYPRESS_RECORD_KEY is not set in the server environment, so cloud: {record: true} will fail`,
     };
   }
   if (hasRecordKey) {

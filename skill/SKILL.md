@@ -106,4 +106,4 @@ A test that passed only on a retry (`flaky` in the result) is not fixed. Look fo
 
 ## Cypress Cloud
 
-`cypress_run {spec, record: true}` records the run when the project has a `projectId` and the server has `CYPRESS_RECORD_KEY` in its environment. The result has the Cloud run URL; Cypress Cloud MCP tools (`cypress_get_failed_tests`, `cypress_get_flaky_tests`) accept it. Never ask the user to paste the record key into the chat.
+`cypress_run {spec, cloud: {record: true}}` records the run when the project has a `projectId` and the server has `CYPRESS_RECORD_KEY` in its environment. The result has the Cloud run URL; Cypress Cloud MCP tools (`cypress_get_failed_tests`, `cypress_get_flaky_tests`) accept it. Never ask the user to paste the record key into the chat.

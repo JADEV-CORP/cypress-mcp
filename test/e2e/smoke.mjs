@@ -175,9 +175,12 @@ try {
     assert.equal(res.data.code, "SPEC_OUTSIDE_PROJECT");
   });
 
-  await check("record needs CYPRESS_RECORD_KEY", async () => {
-    const res = await call("cypress_run", { spec, record: true });
-    assert.equal(res.data.code, "RECORD_KEY_MISSING");
+  await check("cloud.record needs CYPRESS_RECORD_KEY; a top-level record points there", async () => {
+    const res = await call("cypress_run", { spec, cloud: { record: true } });
+    assert.equal(res.data.code, "RECORD_KEY_MISSING", res.text);
+    const old = await call("cypress_run", { spec, record: true });
+    assert.equal(old.isError, true, old.text);
+    assert.match(old.text, /cloud: \{record: true\}/);
   });
 
   await check("a spec that does not compile reports the cause", async () => {
