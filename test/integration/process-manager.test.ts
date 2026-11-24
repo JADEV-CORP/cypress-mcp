@@ -48,8 +48,11 @@ describe("abortAllRuns", () => {
       await abortAllRuns();
 
       expect(await waitFor(() => !alive(pid!), 8_000)).toBe(true);
-      // Stopped from outside the run: no timeout, no cancellation.
-      await expect(run).resolves.toMatchObject({ exitCode: null });
+      // Stopped from outside the run: no timeout, no cancellation. POSIX
+      // reports the signal (no exit code); Windows has no signals, and
+      // tree-kill ends the tree with taskkill /F, which sets an exit code.
+      const result = await run;
+      if (process.platform !== "win32") expect(result.exitCode).toBeNull();
     } finally {
       if (pid && alive(pid)) process.kill(pid, "SIGKILL");
       await run.catch(() => undefined);
