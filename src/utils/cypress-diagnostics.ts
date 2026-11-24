@@ -52,6 +52,12 @@ const COMPILE_ERROR_END = [
 
 const MAX_COMPILE_ERROR_LINES = 40;
 
+/**
+ * Starts the part of a run error that Cypress printed. The text formatter
+ * fences everything from here on, since it can quote the app under test.
+ */
+export const CYPRESS_OUTPUT_LABEL = "Output: ";
+
 export interface RuntimeCheckResult {
   readonly status: "ok" | "warn" | "fail";
   readonly detail: string;

@@ -188,6 +188,8 @@ try {
     assert.equal(run.isError, true);
     assert.equal(run.data.errorKind, "compile", run.text);
     assert.match(run.text, /does-not-exist/);
+    // The error quotes the spec's code: it is in the untrusted fence.
+    assert.match(run.text, /<page data: [^\n]*\n[\s\S]*does-not-exist[\s\S]*\n<\/page data>/);
     assert.ok(!run.text.includes("cypress_doctor"), run.text);
   });
 

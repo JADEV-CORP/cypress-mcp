@@ -9,6 +9,7 @@ import type {
   TestState,
 } from "../types/results.js";
 import {
+  CYPRESS_OUTPUT_LABEL,
   extractCompileError,
   extractDiagnosticSnippet,
 } from "../utils/cypress-diagnostics.js";
@@ -93,7 +94,7 @@ export class OutputParser {
           : "";
       lines.push(`No report from ${listed}${more}: their tests did not run or finish.`);
     }
-    lines.push(`Output: ${extractDiagnosticSnippet(stdout, stderr)}`);
+    lines.push(`${CYPRESS_OUTPUT_LABEL}${extractDiagnosticSnippet(stdout, stderr)}`);
 
     return {
       ...result,
@@ -317,7 +318,7 @@ export class OutputParser {
 
     return {
       ...emptyResult(),
-      error: `Cypress process exited with code ${exitCode ?? "unknown"}. Output: ${diagnostic}`,
+      error: `Cypress process exited with code ${exitCode ?? "unknown"}. ${CYPRESS_OUTPUT_LABEL}${diagnostic}`,
       stdoutTail,
       stderrTail,
     };

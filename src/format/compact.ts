@@ -9,7 +9,8 @@ import path from "node:path";
 import type { RunOutcome } from "../services/run-executor.js";
 import type { FailureContext } from "../services/failure-context.js";
 import type { RunRecord } from "../services/state-store.js";
-import type { TestResult } from "../types/results.js";
+import type { CypressRunResult, TestResult } from "../types/results.js";
+import { CYPRESS_OUTPUT_LABEL } from "../utils/cypress-diagnostics.js";
 import { normalizePath } from "../utils/paths.js";
 import { displayPath } from "../services/projects.js";
 import { fence, INLINE_OUTLINE_CHARS, pageDetail, pageSummary } from "./page.js";
@@ -170,7 +171,7 @@ export function renderRun(
   }
 
   if (result.error && outcome.type === "completed") {
-    lines.push(...crashLines(result.error));
+    lines.push(...crashLines(result.error, result.errorKind));
   }
 
   if (result.cloud) {
@@ -283,8 +284,21 @@ function errorText(failure: FailureContext): string {
 /** Cypress's header above a compile error; the status line already says it. */
 const COMPILE_HEADER = /^Oops\.\.\.we found an error preparing this test file:?$/;
 
-function crashLines(error: string): string[] {
-  const lines = error
+/**
+ * A run error: the status line we wrote, then what Cypress printed. The
+ * Cypress part can quote the app (its console, a compile error showing the
+ * code), so it goes in the untrusted fence like a failure.
+ */
+function crashLines(error: string, kind?: CypressRunResult["errorKind"]): string[] {
+  const at = kind === "compile" ? 0 : error.indexOf(CYPRESS_OUTPUT_LABEL);
+  if (at < 0) {
+    return clipLines(error);
+  }
+  return [...clipLines(error.slice(0, at)), ...fence(clipLines(error.slice(at)), "")];
+}
+
+function clipLines(text: string): string[] {
+  const lines = text
     .split("\n")
     .map((line) => line.trimEnd())
     .filter((line) => line.trim().length > 0 && !COMPILE_HEADER.test(line.trim()));
@@ -361,7 +375,7 @@ export function renderFailureContexts(
   }
 
   if (result.error) {
-    lines.push(...crashLines(result.error));
+    lines.push(...crashLines(result.error, result.errorKind));
     if (result.runningTest) {
       lines.push(`running when stopped: ${quote(result.runningTest)}`);
     }
@@ -423,7 +437,7 @@ export function renderTests(record: RunRecord, nextActions: readonly string[]): 
     `args: ${JSON.stringify(compactArgs(record))}`,
   ];
   if (result.cloud) lines.push(`cloud: ${result.cloud.runUrl}`);
-  if (result.error) lines.push(...crashLines(result.error));
+  if (result.error) lines.push(...crashLines(result.error, result.errorKind));
   lines.push(
     ...(record.specs.length > 1
       ? testLinesBySpec(result.tests, record.prefix)
