@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { ConfigLoader } from "../../src/services/config-loader.js";
-import { createLogger } from "../../src/utils/logger.js";
+import { createLogger, type Logger } from "../../src/utils/logger.js";
 import type { CypressMcpConfig } from "../../src/types/config.js";
 
 const fixtureRoot = path.resolve("test/fixtures/cypress-project");
@@ -22,6 +22,66 @@ describe("ConfigLoader", () => {
     expect(config.specPattern).toEqual(["cypress/e2e/**/*.cy.{ts,js}"]);
     expect(config.supportFile).toBe("cypress/support/e2e.ts");
     expect(config.titleFilterSupport).toBe(false);
+    // No cypress-mcp.config.json is fine: nothing to warn about.
+    expect(config.serverConfigError).toBeUndefined();
+  });
+
+  describe("a cypress-mcp.config.json that cannot be used", () => {
+    async function loadWith(
+      serverConfig: string,
+    ): Promise<{ config: CypressMcpConfig; warnings: Record<string, unknown>[] }> {
+      const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cypress-mcp-config-"));
+      const warnings: Record<string, unknown>[] = [];
+      const recording: Logger = {
+        ...logger,
+        warn: (message, data) => warnings.push({ message, ...data }),
+      };
+      try {
+        await fs.writeFile(
+          path.join(tempRoot, "cypress.config.js"),
+          "module.exports = { e2e: {} };\n",
+        );
+        await fs.writeFile(path.join(tempRoot, "cypress-mcp.config.json"), serverConfig);
+        const config = await new ConfigLoader(tempRoot, recording).load();
+        // The logged path is absolute; keep only the file name to compare.
+        return {
+          config,
+          warnings: warnings.map((w) => ({
+            ...w,
+            path: path.basename(String(w["path"])),
+          })),
+        };
+      } finally {
+        await fs.rm(tempRoot, { recursive: true, force: true });
+      }
+    }
+
+    it("warns with the path and parse error when it is not valid JSON, and keeps defaults", async () => {
+      const { config, warnings } = await loadWith(
+        '{ "defaultBrowser": "chrome", "defaultTimeout": 1000, }\n',
+      );
+
+      expect(config.defaultBrowser).toBeUndefined();
+      expect(config.defaultTimeout).toBe(300_000);
+      expect(config.failureContext).toBe(true);
+      expect(config.serverConfigError).toMatch(
+        /^cypress-mcp\.config\.json ignored, defaults apply: .*JSON/,
+      );
+      expect(warnings).toEqual([
+        expect.objectContaining({
+          path: "cypress-mcp.config.json",
+          error: expect.stringMatching(/JSON/),
+        }),
+      ]);
+    });
+
+    it("warns when it holds something other than an object", async () => {
+      const { config } = await loadWith('["chrome"]\n');
+
+      expect(config.serverConfigError).toBe(
+        "cypress-mcp.config.json ignored, defaults apply: it must hold a JSON object",
+      );
+    });
   });
 
   it("should cache config on repeated loads", async () => {

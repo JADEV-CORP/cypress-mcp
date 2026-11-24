@@ -245,3 +245,25 @@ describe("a config that does not load through the wrapper", () => {
     expect(runArgs(log)[0]).toContain("--reporter");
   });
 });
+
+describe("a cypress-mcp.config.json with a typo", () => {
+  it("keeps working with defaults and shows the parse error in cypress_doctor", async () => {
+    const root = tempRoot();
+    project(root);
+    fs.writeFileSync(
+      path.join(root, "cypress-mcp.config.json"),
+      '{ "failureContext": false, }\n',
+    );
+    const client = await connect(root);
+
+    const doctor = await call(client, "cypress_doctor", { quick: true });
+    expect(doctor.text.split("\n")[0]).toBe(
+      "Healthy, 1 warning(s) (quick: Cypress not started)",
+    );
+    expect(doctor.text).toMatch(
+      /^warn Server config: cypress-mcp\.config\.json ignored, defaults apply: .*JSON/m,
+    );
+    // failureContext: false was not applied.
+    expect(doctor.text).toContain("ok   Failure context: On");
+  });
+});

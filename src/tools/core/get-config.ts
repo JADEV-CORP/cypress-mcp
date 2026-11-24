@@ -19,6 +19,7 @@ const configDataSchema = z.object({
   supportFile: z.union([z.string(), z.literal(false)]).optional(),
   titleFilterSupport: z.boolean(),
   projectId: z.string().optional(),
+  serverConfigError: z.string().optional(),
   cloud: z.object({
     projectId: z.string().nullable(),
     recordKeySet: z.boolean(),

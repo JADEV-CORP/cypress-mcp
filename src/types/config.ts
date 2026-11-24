@@ -21,6 +21,11 @@ export interface CypressMcpConfig {
    * filters titles without @cypress/grep. Default true.
    */
   readonly failureContext: boolean;
+  /**
+   * Why cypress-mcp.config.json was ignored: it exists but could not be read
+   * or is not a JSON object. Every setting then has its default.
+   */
+  readonly serverConfigError?: string;
 }
 
 export interface RawServerConfig {

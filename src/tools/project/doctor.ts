@@ -129,6 +129,13 @@ async function runChecks(ctx: ToolContext, launch: boolean): Promise<Check[]> {
     return checks;
   }
   checks.push({ check: "Config file", status: "ok", detail: config.cypressConfigFile });
+  if (config.serverConfigError) {
+    checks.push({
+      check: "Server config",
+      status: "warn",
+      detail: config.serverConfigError,
+    });
+  }
 
   const specs = await ctx.specFinder.findSpecs(config.specPattern);
   checks.push({

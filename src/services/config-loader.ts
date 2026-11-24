@@ -77,7 +77,8 @@ export class ConfigLoader {
   }
 
   private async build(): Promise<CypressMcpConfig> {
-    const serverConfig = await this.loadServerConfig();
+    const { config: serverConfig, error: serverConfigError } =
+      await this.loadServerConfig();
     const configFile = await this.findCypressConfig(serverConfig?.cypressConfigFile);
     if (!configFile) {
       throw new ConfigNotFoundError(this.projectRoot);
@@ -117,6 +118,7 @@ export class ConfigLoader {
         serverConfig?.projectId ??
         nonEmpty(process.env["CYPRESS_PROJECT_ID"]) ??
         configHints.projectId,
+      ...(serverConfigError ? { serverConfigError } : {}),
     };
 
     this.logger.info("Config loaded", {
@@ -156,19 +158,35 @@ export class ConfigLoader {
     return null;
   }
 
-  private async loadServerConfig(): Promise<RawServerConfig | null> {
+  /**
+   * cypress-mcp.config.json is optional. One that exists but cannot be used
+   * is ignored with a warning, instead of silently, so a typo does not drop
+   * settings such as defaultBrowser without anyone noticing.
+   */
+  private async loadServerConfig(): Promise<{
+    config?: RawServerConfig;
+    error?: string;
+  }> {
     const configPath = path.join(this.projectRoot, SERVER_CONFIG_FILE);
+    let reason: string;
     try {
-      const raw = await this.readTracked(configPath);
-      const parsed: unknown = JSON.parse(raw);
-      if (typeof parsed === "object" && parsed !== null) {
+      const parsed: unknown = JSON.parse(await this.readTracked(configPath));
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
         this.logger.info("Server config loaded", { path: configPath });
-        return parsed as RawServerConfig;
+        return { config: parsed as RawServerConfig };
       }
-      return null;
-    } catch {
-      return null;
+      reason = "it must hold a JSON object";
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        return {};
+      }
+      reason = err instanceof Error ? err.message : String(err);
     }
+    this.logger.warn("Server config ignored, using defaults", {
+      path: configPath,
+      error: reason,
+    });
+    return { error: `${SERVER_CONFIG_FILE} ignored, defaults apply: ${reason}` };
   }
 
   /** Invalidate cached config (useful after config changes) */
