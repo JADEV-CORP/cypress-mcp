@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.0 (unreleased)
+## 0.4.0 (2026-11-24)
 
 Everything needed to fix a failing test in one call: the page at the failure, without touching the project. The default tool set stays at four; the new capabilities are run arguments and `cypress_get_failure` views.
 
@@ -37,7 +37,7 @@ Everything needed to fix a failing test in one call: the page at the failure, wi
 - The package ships `runtime/` (wrapper and browser runtime).
 - E2E: the smoke test checks the page context, the junit reporter and several specs against a real browser, and TS (ESM, CJS) and MJS projects through the CLI. Cypress is installed once in `test/e2e` for every project, with `typescript`.
 
-## 0.3.0 (unreleased)
+## 0.3.0 (not published, shipped in 0.4.0)
 
 Built for agents: one call returns a compact failure the agent can fix, a smaller tool list, a `runId` on every result, and a fast `npx` start. Measured with the 0.2.1 review harness against 0.2.2 (o200k tokens): a 150 test spec with 15 failures went from 15,910 tokens (52,660 characters) to 1,055 (3,229 characters); a run with 2 failures from 1,275 to 217; a passing run from 325 to 26; the tool list from 1,598 tokens for 12 tools to 739 for 4.
 
@@ -87,7 +87,7 @@ Built for agents: one call returns a compact failure the agent can fix, a smalle
 - The CI, E2E and CodeQL workflows pin their actions to commit SHAs with version comments, and grant permissions per job (`contents: read`; CodeQL also `security-events: write`).
 - The E2E smoke test drives the new tools, the legacy names and the CLI against a real Cypress.
 
-## 0.2.2 (unreleased)
+## 0.2.2 (not published, shipped in 0.4.0)
 
 Fixes for problems agents hit in 0.2.1, and setup docs for every major MCP client.
 
