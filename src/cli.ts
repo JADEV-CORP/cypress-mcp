@@ -4,9 +4,10 @@
 // The default MCP tools from a shell, with the same compact output: `run` is
 // cypress_run, `doctor` cypress_doctor, `list` cypress_list_specs. Agents
 // that have a shell often prefer a command to an MCP server, and CI logs read
-// the same way.
+// the same way. `init` is for people: it writes the MCP client config.
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { createInterface } from "node:readline/promises";
 import { isatty } from "node:tty";
 import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 import type { CallToolResult } from "@modelcontextprotocol/server";
@@ -19,6 +20,14 @@ import { abortAllRuns } from "./services/process-manager.js";
 import { EXCERPT_RADIUS, runResult, type RunData } from "./tools/run.js";
 import { doctorResult } from "./tools/project/doctor.js";
 import { listSpecsResult } from "./tools/core/list-specs.js";
+import {
+  detectClients,
+  OUTSIDE_CLIENTS,
+  parseClients,
+  PROJECT_CLIENTS,
+  type ClientId,
+} from "./setup/clients.js";
+import { findProjects, formatInitReport, initProject } from "./setup/init.js";
 import type { ToolContext } from "./types/index.js";
 import { CypressMcpError } from "./utils/errors.js";
 import { createLogger } from "./utils/logger.js";
@@ -29,6 +38,7 @@ Commands:
   run [<spec>...]     run specs in one Cypress launch, print each failure
   doctor              check the Cypress setup
   list                list the specs and their test counts
+  init                write the MCP client config for this project
 
 cypress-mcp run [<spec>...] [options]
 Runs Cypress once for the given specs, or for every spec when none is given,
@@ -53,14 +63,30 @@ Lists the spec files and their test counts without running anything.
 --titles adds each test's full title, the text --test matches. --pattern is
 a glob relative to the project (default: the project's specPattern).
 
-Options of every command:
+Options of run, doctor and list:
   --project <dir>     monorepos: the folder with cypress.config.*
   --json              print the full result as JSON
   --cwd <dir>         Cypress project root (default: the current directory)
 
-Exit code: 0 passed, healthy or listed; 1 a test failed or the run did not
-complete (run), a check failed (doctor); 2 bad arguments or setup error
-(spec or Cypress not found).
+cypress-mcp init [--client <name>] [options]
+Adds the cypress server to the project's MCP client config files, keeping
+what else they hold, with the paths and timeouts each client needs. Without
+--client: the clients whose files are in the project (.mcp.json, .claude,
+.vscode, .cursor, .gemini, .junie, .devin, .codex), else .mcp.json for
+Claude Code. In a terminal it asks first.
+  --client <name>     claude, vscode, vscode-legacy, cursor, gemini, junie,
+                      devin, codex; printed, not written: claude-desktop,
+                      zed, jetbrains, copilot-cloud. Repeatable or a comma list
+  --force             replace a cypress entry that differs
+  --dry-run           print what would be written, write nothing
+  --yes, -y           do not ask
+  --json              print a summary as JSON
+  --cwd <dir>         the project folder (default: the current directory)
+
+Exit code: 0 passed, healthy, listed or set up; 1 a test failed or the run
+did not complete (run), a check failed (doctor), an entry differs or a file
+could not be edited safely (init); 2 bad arguments or setup error (spec,
+project or Cypress not found).
 
 Without a command, cypress-mcp is the MCP server on stdio, started by an MCP
 client:
@@ -68,10 +94,11 @@ client:
 
 /** Printed instead of starting the server when a person runs it in a terminal. */
 const SERVER_NOTE = `cypress-mcp is an MCP server: an MCP client (Claude Code, Cursor, VS Code...)
-starts it and talks to it over stdin. To add it to a client, see
-https://github.com/jams4code/cypress-mcp#setup
+starts it and talks to it over stdin. To add it to a client, run cypress-mcp
+init in the project, or see https://github.com/jams4code/cypress-mcp#setup
 
 From a terminal, use a command:
+  cypress-mcp init            write the MCP client config for this project
   cypress-mcp run [<spec>...] run specs (default: all) and print each failure
   cypress-mcp doctor          check the Cypress setup
   cypress-mcp list            list the specs
@@ -87,6 +114,8 @@ export interface CliIo {
   readonly cwd: string;
   /** stdin is a terminal: a person started the process. MCP clients pipe it. */
   readonly interactive: boolean;
+  /** Asks a person a question in the terminal and resolves with the answer */
+  readonly ask?: (question: string) => Promise<string>;
 }
 
 const defaultIo: CliIo = {
@@ -94,6 +123,15 @@ const defaultIo: CliIo = {
   err: (text) => process.stderr.write(`${text}\n`),
   cwd: process.cwd(),
   interactive: isatty(0),
+  ask: async (question) => {
+    // On stderr, so stdout keeps only the report.
+    const prompt = createInterface({ input: process.stdin, output: process.stderr });
+    try {
+      return await prompt.question(question);
+    } finally {
+      prompt.close();
+    }
+  },
 };
 
 type Command = (argv: readonly string[], io: CliIo) => Promise<number>;
@@ -310,10 +348,122 @@ async function listCli(argv: readonly string[], io: CliIo): Promise<number> {
   }
 }
 
+/**
+ * `cypress-mcp init`: exit 0 when every file is written or up to date, 1
+ * when an entry differs or a file cannot be edited safely, 2 on bad
+ * arguments or no project.
+ */
+async function initCli(argv: readonly string[], io: CliIo): Promise<number> {
+  const parsed = parse(argv, io, false, {
+    cwd: { type: "string" },
+    client: { type: "string", multiple: true },
+    force: { type: "boolean" },
+    "dry-run": { type: "boolean" },
+    yes: { type: "boolean", short: "y" },
+    json: { type: "boolean" },
+    help: { type: "boolean", short: "h" },
+  });
+  if (!parsed) {
+    return EXIT_USAGE;
+  }
+  const { values } = parsed;
+  if (values.help) {
+    io.out(CLI_USAGE);
+    return EXIT_PASSED;
+  }
+
+  // Bad names are bad arguments: reported before looking for the project.
+  const given = values.client === undefined ? undefined : clientsFrom(values.client, io);
+  if (given === null) {
+    return EXIT_USAGE;
+  }
+  const root = path.resolve(io.cwd, values.cwd ?? ".");
+  try {
+    // The project first: no question is worth asking without one.
+    const { projects } = await findProjects(root);
+    // --json output is for scripts, which cannot answer.
+    const clients = given ?? (await foundClients(root, io, !values.yes && !values.json));
+    if (clients === null) {
+      return EXIT_USAGE;
+    }
+    const report = await initProject({
+      root,
+      projects,
+      clients,
+      force: values.force === true,
+      dryRun: values["dry-run"] === true,
+    });
+    io.out(values.json ? JSON.stringify(report, null, 2) : formatInitReport(report));
+    return report.ok ? EXIT_PASSED : EXIT_FAILED;
+  } catch (err) {
+    // Worded for init already: CLI_SUGGESTIONS speak of other commands.
+    if (!(err instanceof CypressMcpError)) {
+      throw err;
+    }
+    io.err(
+      `Error ${err.code}: ${err.message}${err.suggestion ? `\n${err.suggestion}` : ""}`,
+    );
+    return EXIT_USAGE;
+  }
+}
+
+/**
+ * The clients the project uses, which a person in a terminal may change when
+ * `mayAsk`; null after printing why there are none.
+ */
+async function foundClients(
+  root: string,
+  io: CliIo,
+  mayAsk: boolean,
+): Promise<ClientId[] | null> {
+  const found = detectClients(root);
+  if (!mayAsk || !io.interactive || !io.ask) {
+    return found;
+  }
+  // Ctrl+C or Ctrl+D at the prompt rejects: the person changed their mind.
+  const answer = await io.ask(clientQuestion(found)).catch(() => undefined);
+  if (answer === undefined) {
+    io.err("Cancelled: nothing is written.");
+    return null;
+  }
+  return clientsFrom([answer], io, found);
+}
+
+/** Client names from --client or an answer, `empty` for none; null after printing what is wrong. */
+function clientsFrom(
+  values: readonly string[],
+  io: CliIo,
+  empty?: ClientId[],
+): ClientId[] | null {
+  const { clients, unknown } = parseClients(values);
+  if (unknown.length > 0) {
+    io.err(
+      `Unknown client: ${unknown.join(", ")}. Known: ${[...PROJECT_CLIENTS, ...OUTSIDE_CLIENTS].join(", ")}.`,
+    );
+    return null;
+  }
+  if (clients.length > 0) {
+    return clients;
+  }
+  if (empty) {
+    return empty;
+  }
+  io.err("--client needs a client name, for example --client cursor");
+  return null;
+}
+
+function clientQuestion(found: readonly ClientId[]): string {
+  return `Set up cypress-mcp for which MCP clients?
+  written in the project: ${PROJECT_CLIENTS.join(", ")}
+  printed, not written:   ${OUTSIDE_CLIENTS.join(", ")}
+Comma list, Enter for ${found.join(", ")}: `;
+}
+
 const COMMANDS: ReadonlyMap<string, Command> = new Map([
   ["run", runCli],
   ["doctor", doctorCli],
   ["list", listCli],
+  ["init", initCli],
 ]);
 
 /** Parsed arguments, or undefined after printing what is wrong with them. */

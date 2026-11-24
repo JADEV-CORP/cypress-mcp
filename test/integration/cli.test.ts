@@ -323,3 +323,261 @@ describe("cypress-mcp with an unknown command", () => {
     }
   });
 });
+
+describe("cypress-mcp init", () => {
+  const folders: string[] = [];
+
+  afterAll(() => {
+    for (const folder of folders) fs.rmSync(folder, { recursive: true, force: true });
+  });
+
+  /** A temp folder (real path, as the child process sees it) with these files. */
+  function folder(files: Record<string, string> = {}): string {
+    const dir = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "cypress-mcp-init-")),
+    );
+    folders.push(dir);
+    for (const [file, content] of Object.entries(files)) {
+      const target = path.join(dir, file);
+      // "name/" is a folder.
+      fs.mkdirSync(file.endsWith("/") ? target : path.dirname(target), {
+        recursive: true,
+      });
+      if (!file.endsWith("/")) fs.writeFileSync(target, content);
+    }
+    return dir;
+  }
+
+  const CONFIG = { "cypress.config.js": "module.exports = {};\n" };
+  const CLAUDE_ENTRY = {
+    type: "stdio",
+    command: "npx",
+    args: ["-y", "cypress-mcp"],
+    timeout: 900000,
+  };
+
+  function read(dir: string, file: string): unknown {
+    return JSON.parse(fs.readFileSync(path.join(dir, file), "utf-8"));
+  }
+
+  it("prints what it would write with --dry-run and writes nothing", () => {
+    const dir = folder(CONFIG);
+    const { status, stdout, stderr } = cli(["init", "--dry-run"], dir);
+
+    expect(status).toBe(0);
+    expect(stderr).toBe("");
+    expect(stdout).toMatch(
+      new RegExp(`^Cypress project: ${dir.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&")}\n`),
+    );
+    expect(stdout).toContain("Dry run: nothing is written.");
+    expect(stdout).toContain("would create .mcp.json (Claude Code)\n");
+    expect(stdout).toContain('      "cypress": {\n');
+    expect(stdout.trim().split("\n").at(-1)).toBe(
+      "next: run it again without --dry-run to write the files",
+    );
+    expect(fs.readdirSync(dir)).toEqual(["cypress.config.js"]);
+  });
+
+  it("writes .mcp.json when no client is found, then finds it up to date", () => {
+    const dir = folder(CONFIG);
+
+    const first = cli(["init"], dir);
+    expect(first.status).toBe(0);
+    expect(first.stdout).toContain("created .mcp.json (Claude Code)\n");
+    expect(first.stdout.trim().split("\n").at(-1)).toBe(
+      "next: restart or reload Claude Code, then ask the agent to run cypress_doctor",
+    );
+    const written = fs.readFileSync(path.join(dir, ".mcp.json"), "utf-8");
+    expect(written).toBe(
+      `${JSON.stringify({ mcpServers: { cypress: CLAUDE_ENTRY } }, null, 2)}\n`,
+    );
+
+    const second = cli(["init"], dir);
+    expect(second.status).toBe(0);
+    expect(second.stdout).toContain(
+      "unchanged .mcp.json (Claude Code): cypress is already set up",
+    );
+    expect(fs.readFileSync(path.join(dir, ".mcp.json"), "utf-8")).toBe(written);
+  });
+
+  it("sets up the clients whose folders exist and keeps their other servers", () => {
+    const dir = folder({
+      ...CONFIG,
+      ".cursor/mcp.json": JSON.stringify({ mcpServers: { github: { command: "gh" } } }),
+      ".codex/": "",
+    });
+
+    const { status, stdout } = cli(["init", "--cwd", dir], os.tmpdir());
+    expect(status).toBe(0);
+    expect(stdout).toContain(
+      "updated .cursor/mcp.json (Cursor): added cypress, kept 1 other server\n",
+    );
+    expect(stdout).toContain("created .codex/config.toml (Codex)\n");
+    expect(stdout).toContain("note: .codex/config.toml has the absolute path");
+    expect(stdout).toContain("Codex reads .codex/config.toml only in a trusted project");
+
+    expect(read(dir, ".cursor/mcp.json")).toEqual({
+      mcpServers: {
+        github: { command: "gh" },
+        cypress: {
+          type: "stdio",
+          command: "npx",
+          args: ["-y", "cypress-mcp", "--cwd", "${workspaceFolder}"],
+        },
+      },
+    });
+    const toml = fs.readFileSync(path.join(dir, ".codex", "config.toml"), "utf-8");
+    expect(toml).toBe(
+      [
+        "[mcp_servers.cypress]",
+        'command = "npx"',
+        `args = ["-y", "cypress-mcp", "--cwd", ${JSON.stringify(dir)}]`,
+        "startup_timeout_sec = 30",
+        "tool_timeout_sec = 900",
+        "",
+      ].join("\n"),
+    );
+    expect(fs.existsSync(path.join(dir, ".mcp.json"))).toBe(false);
+  });
+
+  it("leaves a cypress entry that differs unless --force", () => {
+    const existing = JSON.stringify(
+      { mcpServers: { cypress: { command: "npx", args: ["cypress-mcp"] } } },
+      null,
+      2,
+    );
+    const dir = folder({ ...CONFIG, ".mcp.json": existing });
+
+    const kept = cli(["init", "--client", "claude"], dir);
+    expect(kept.status).toBe(1);
+    expect(kept.stdout).toContain(
+      "not written .mcp.json (Claude Code): its cypress entry differs, --force replaces it",
+    );
+    expect(kept.stdout).toContain(
+      '  args is ["cypress-mcp"], init writes ["-y","cypress-mcp"]',
+    );
+    expect(kept.stdout.trim().split("\n").at(-1)).toBe(
+      "next: run it again with --force to replace the cypress entries that differ, or edit them by hand",
+    );
+    expect(fs.readFileSync(path.join(dir, ".mcp.json"), "utf-8")).toBe(existing);
+
+    const forced = cli(["init", "--client", "claude", "--force"], dir);
+    expect(forced.status).toBe(0);
+    expect(forced.stdout).toContain(
+      "updated .mcp.json (Claude Code): replaced the cypress entry",
+    );
+    expect(read(dir, ".mcp.json")).toEqual({ mcpServers: { cypress: CLAUDE_ENTRY } });
+  });
+
+  it("prints a summary with --json", () => {
+    const dir = folder({ ...CONFIG, ".gemini/settings.json": "{ // comment\n}" });
+    const { status, stdout } = cli(["init", "--json", "--client", "gemini,vscode"], dir);
+    const summary = JSON.parse(stdout) as {
+      root: string;
+      projects: string[];
+      dryRun: boolean;
+      ok: boolean;
+      clients: string[];
+      files: {
+        file: string;
+        status: string;
+        written: boolean;
+        clients: string[];
+        machinePath: boolean;
+        reason?: string;
+      }[];
+      next: string;
+    };
+
+    expect(status).toBe(1);
+    expect(summary).toMatchObject({
+      root: dir,
+      projects: ["."],
+      dryRun: false,
+      ok: false,
+      clients: ["gemini", "vscode"],
+    });
+    expect(summary.files).toMatchObject([
+      {
+        file: ".mcp.json",
+        clients: ["vscode"],
+        status: "create",
+        written: true,
+        machinePath: true,
+      },
+      { file: ".gemini/settings.json", status: "refused", written: false },
+    ]);
+    expect(summary.files[1]!.reason).toContain("not plain JSON");
+    expect(read(dir, ".mcp.json")).toMatchObject({
+      mcpServers: { cypress: { args: ["-y", "cypress-mcp", "--cwd", dir] } },
+    });
+  });
+
+  it("prints the config of clients set up outside the project", () => {
+    const dir = folder(CONFIG);
+    const home = folder();
+    const { status, stdout } = cli(["init", "--client", "claude-desktop,zed"], dir, {
+      HOME: home,
+      USERPROFILE: home,
+      APPDATA: path.join(home, "AppData", "Roaming"),
+    });
+
+    expect(status).toBe(0);
+    expect(stdout).toContain(`Claude Desktop: add to ${home}`);
+    expect(stdout).toContain("Zed: add to Zed's settings.json");
+    expect(stdout).toContain(`"--cwd",\n          ${JSON.stringify(dir)}`);
+    expect(stdout).toContain('"context_servers": {');
+    expect(stdout.trim().split("\n").at(-1)).toBe(
+      "next: add each entry above where it says, then ask the agent to run cypress_doctor",
+    );
+    expect(fs.readdirSync(dir)).toEqual(["cypress.config.js"]);
+  });
+
+  it("sets up a monorepo root for the server to pick the project", () => {
+    const dir = folder({
+      "apps/web/cypress.config.ts": "export default {};\n",
+      "apps/admin/cypress.config.js": "module.exports = {};\n",
+    });
+    const { status, stdout } = cli(["init", "--yes"], dir);
+
+    expect(status).toBe(0);
+    expect(stdout).toContain(`Cypress projects under ${dir}: apps/admin, apps/web\n`);
+    expect(read(dir, ".mcp.json")).toEqual({ mcpServers: { cypress: CLAUDE_ENTRY } });
+  });
+
+  it("exits 2 without a project, from the home folder and on bad arguments", () => {
+    const empty = folder();
+    const none = cli(["init"], empty);
+    expect(none.status).toBe(2);
+    expect(none.stderr).toContain(
+      `Error CONFIG_NOT_FOUND: No cypress.config.* in ${empty} or its subfolders.`,
+    );
+
+    // A project under the home folder is not searched for from the home folder.
+    const home = folder({ "dev/shop/cypress.config.js": "module.exports = {};\n" });
+    const fromHome = cli(["init"], home, { HOME: home, USERPROFILE: home });
+    expect(fromHome.status).toBe(2);
+    expect(fromHome.stderr).toContain(
+      "does not look for projects in the disk root, the home folder or a folder above it",
+    );
+    expect(fs.existsSync(path.join(home, ".mcp.json"))).toBe(false);
+
+    const missing = cli(["init", "--cwd", path.join(empty, "nope")], empty);
+    expect(missing.status).toBe(2);
+    expect(missing.stderr).toContain("does not exist or is not a folder");
+
+    const dir = folder(CONFIG);
+    const unknown = cli(["init", "--client", "cursor,vim"], dir);
+    expect(unknown.status).toBe(2);
+    expect(unknown.stderr).toContain("Unknown client: vim");
+    expect(cli(["init", "--nope"], dir).status).toBe(2);
+    expect(cli(["init", "extra"], dir).status).toBe(2);
+    expect(fs.readdirSync(dir)).toEqual(["cypress.config.js"]);
+  });
+
+  it("is in the usage", () => {
+    const help = cli(["init", "--help"]);
+    expect(help.status).toBe(0);
+    expect(help.stdout).toContain("cypress-mcp init [--client <name>] [options]");
+  });
+});
