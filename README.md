@@ -69,6 +69,17 @@ The package has no dependencies to install (they are bundled), so a first `npx` 
 
 Add `--caps` for more tools: `--caps analyze,config` or `--caps all`. See [Tools](#tools).
 
+### cypress-mcp init
+
+Run it in the project to write the client config described in the sections below:
+
+```bash
+npx cypress-mcp init                                  # the clients the project uses, else .mcp.json
+npx cypress-mcp init --client cursor,codex --dry-run  # print what it would write
+```
+
+It finds the Cypress project the way the server does, then sets up the clients whose files are in the project (`.mcp.json`, `.claude/`, `.vscode/`, `.cursor/`, `.gemini/`, `.junie/`, `.devin/`, `.codex/`), or `.mcp.json` for Claude Code when there are none. In a terminal it asks first; `--yes` skips the question. Other servers and settings in those files are kept, and a `cypress` entry that differs is left alone unless `--force`. Paths are relative (`${workspaceFolder}`) where the client supports it, so the file can be committed; the output names the files that hold an absolute path. For Claude Desktop, Zed, JetBrains AI Assistant and the Copilot cloud agent, `--client claude-desktop` (or `zed`, `jetbrains`, `copilot-cloud`) prints the entry with your paths and where it goes. Then restart or reload the client and ask the agent to run `cypress_doctor`. `npx cypress-mcp init --help` lists the client names and options.
+
 ### Timeouts
 
 A run takes from a few seconds to several minutes. cypress-mcp stops a run after 5 minutes by default (`defaultTimeout` in `cypress-mcp.config.json`, or `timeout` on the call, up to 1 hour) and returns the tests it finished and the one that hung. Keep the client's tool timeout above that, or the client gives up while Cypress is still running. Where a client needs a setting, the examples below use 15 minutes (Zed allows 10 at most).
