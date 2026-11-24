@@ -28,7 +28,7 @@ import {
   textResult,
   type Envelope,
 } from "./result.js";
-import { screenshotImages, screenshotLinks } from "./screenshots.js";
+import { lastAttempts, screenshotImages, screenshotLinks } from "./screenshots.js";
 
 const TOOL = "cypress_get_failure";
 
@@ -73,6 +73,10 @@ const failureDataSchema = z.object({
     .optional(),
   screenshots: z.array(z.string()).optional(),
   missingScreenshots: z.number().optional(),
+  earlierAttempts: z
+    .number()
+    .optional()
+    .describe("Screenshots of earlier attempts of retried tests, left out"),
   stdoutTail: z.string().optional(),
   stderrTail: z.string().optional(),
   error: z.string().optional(),
@@ -89,7 +93,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
     {
       title: "Inspect a Cypress run",
       description:
-        'Details of a run from cypress_run. view "failures" (default): each failure with source excerpt, error, diff, stack, screenshot. "page": the page at one failure (DOM/ARIA outline, URL, console and network errors, command log, similar selectors). "tests": every test. "screenshots": image links. "output": the end of Cypress\'s output.',
+        'Details of a run from cypress_run. view "failures" (default): each failure with source excerpt, error, diff, stack, screenshot. "page": the page at one failure (DOM/ARIA outline, URL, console and network errors, command log, similar selectors). "tests": every test. "screenshots": image links, the last attempt of each retried test. "output": the end of Cypress\'s output.',
       inputSchema: z.object({
         runId: z
           .string()
@@ -110,17 +114,24 @@ export function register(server: McpServer, ctx: ToolContext): void {
           .boolean()
           .optional()
           .describe("Add the screenshots as images, scaled to 1000 px wide"),
+        attempts: z
+          .boolean()
+          .optional()
+          .describe('view "screenshots": also the earlier attempts of retried tests'),
       }),
       outputSchema: envelopeSchema(failureDataSchema),
       annotations: READ_ONLY,
     },
-    async ({ runId, view, failure, image }) => {
+    async ({ runId, view, failure, image, attempts }) => {
       try {
         const record = ctx.stateStore.getRun(runId);
         if (!record) {
           throw new RunNotFoundError(runId, ctx.stateStore.runIds());
         }
-        return await inspect(ctx, record, view, failure, image === true);
+        return await inspect(ctx, record, view, failure, {
+          image: image === true,
+          attempts: attempts === true,
+        });
       } catch (err) {
         return errorResult(TOOL, err, ctx.logger);
       }
@@ -133,7 +144,7 @@ async function inspect(
   record: RunRecord,
   view: View,
   failure: number | undefined,
-  image: boolean,
+  { image, attempts }: { image: boolean; attempts: boolean },
 ): Promise<CallToolResult> {
   const { result } = record;
   const show = (file: string): string => displayPath(record.prefix, file);
@@ -246,9 +257,20 @@ async function inspect(
         }
       }
       const missing = result.screenshots.length - existing.length;
-      const text = renderScreenshots(record, existing, missing, {
+      // A retried test leaves a screenshot per attempt; the last one is what
+      // its failure names, the others cost images for little.
+      const { last, earlier } = lastAttempts(existing);
+      const shown = attempts ? existing : last;
+      const left = attempts ? 0 : earlier.length;
+      const nextActions =
+        left > 0
+          ? [
+              `${left} earlier attempt(s) of retried tests: cypress_get_failure ${runRef},"view":"screenshots","attempts":true}`,
+            ]
+          : [];
+      const text = renderScreenshots(record, shown, missing, {
         displayRoot: ctx.serverRoot,
-        nextActions: [],
+        nextActions,
       });
       return withMedia(
         textResult(
@@ -257,13 +279,14 @@ async function inspect(
             firstLine(text),
             {
               ...base,
-              screenshots: existing,
+              screenshots: shown,
               ...(missing > 0 ? { missingScreenshots: missing } : {}),
+              ...(left > 0 ? { earlierAttempts: left } : {}),
             },
-            [],
+            nextActions,
           ),
         ),
-        existing,
+        shown,
       );
     }
 

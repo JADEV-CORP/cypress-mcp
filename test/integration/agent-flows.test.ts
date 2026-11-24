@@ -365,6 +365,55 @@ describe("cypress_get_failure", () => {
     expect(shots.structured.data["screenshots"]).toHaveLength(2);
   });
 
+  it("shows the last attempt of a retried failure, earlier attempts on request", async () => {
+    // Written here, not in the fixture, so the spec counts elsewhere stay put.
+    const spec = path.join(root, "cypress", "e2e", "retried.cy.js");
+    fs.writeFileSync(
+      spec,
+      'it("fails every attempt", () => {\n  expect(true).to.equal(false);\n});\n',
+    );
+    try {
+      const run = await call("cypress_run", { spec: "cypress/e2e/retried.cy.js" });
+      const runId = run.structured.runId!;
+      const [failure] = run.structured.data["failures"] as { screenshot: string }[];
+      expect(path.basename(failure!.screenshot)).toBe(
+        "Retried -- fails every attempt (failed) (attempt 3).png",
+      );
+      expect(run.structured.data["screenshots"]).toHaveLength(3);
+
+      for (const view of ["screenshots", "failures"]) {
+        const result = await client.callTool({
+          name: "cypress_get_failure",
+          arguments: { runId, view, image: true },
+        });
+        const content = result.content as { type: string; name?: string }[];
+        expect(
+          content
+            .filter((item) => item.type === "resource_link")
+            .map((item) => item.name),
+        ).toEqual(["Retried -- fails every attempt (failed) (attempt 3).png"]);
+        expect(content.filter((item) => item.type === "image")).toHaveLength(1);
+      }
+
+      const shots = await call("cypress_get_failure", { runId, view: "screenshots" });
+      expect(shots.structured.data["screenshots"]).toEqual([failure!.screenshot]);
+      expect(shots.structured.data["earlierAttempts"]).toBe(2);
+      expect(shots.text).toContain(
+        `next: 2 earlier attempt(s) of retried tests: cypress_get_failure {"runId":"${runId}","view":"screenshots","attempts":true}`,
+      );
+
+      const all = await call("cypress_get_failure", {
+        runId,
+        view: "screenshots",
+        attempts: true,
+      });
+      expect(all.structured.data["screenshots"]).toHaveLength(3);
+      expect(all.structured.data["earlierAttempts"]).toBeUndefined();
+    } finally {
+      fs.rmSync(spec, { force: true });
+    }
+  });
+
   it("fails with the stored runIds for an unknown runId", async () => {
     const { isError, text, structured } = await call("cypress_get_failure", {
       runId: "run_999",

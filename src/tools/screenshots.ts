@@ -26,6 +26,43 @@ export function screenshotUri(runId: string, index: number): string {
   return `cypress-mcp://runs/${encodeURIComponent(runId)}/screenshots/${index}`;
 }
 
+// Cypress names the second and later attempts of a test `<name> (attempt N)`,
+// before the ` (1)` it adds when the file already exists.
+const ATTEMPT_SUFFIX = / \(attempt (\d+)\)((?: \(\d+\))?)$/;
+
+/**
+ * Splits a run's screenshots into the last attempt of each (the one a failure
+ * names) and the earlier attempts of retried tests, which are near duplicates
+ * of it. Both keep the order of `files`.
+ */
+export function lastAttempts(files: readonly string[]): {
+  last: string[];
+  earlier: string[];
+} {
+  const newest = new Map<string, { file: string; attempt: number }>();
+  for (const file of files) {
+    const extension = path.extname(file);
+    const name = path.basename(file, extension);
+    const match = ATTEMPT_SUFFIX.exec(name);
+    const key = match
+      ? path.join(
+          path.dirname(file),
+          `${name.slice(0, match.index)}${match[2]}${extension}`,
+        )
+      : file;
+    const attempt = match ? Number(match[1]) : 1;
+    const known = newest.get(key);
+    if (!known || attempt > known.attempt) {
+      newest.set(key, { file, attempt });
+    }
+  }
+  const last = new Set([...newest.values()].map((entry) => entry.file));
+  return {
+    last: files.filter((file) => last.has(file)),
+    earlier: files.filter((file) => !last.has(file)),
+  };
+}
+
 /** Resource links for the given screenshot files of a run. */
 export function screenshotLinks(
   record: RunRecord,

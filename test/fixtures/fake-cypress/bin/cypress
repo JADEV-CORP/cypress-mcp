@@ -96,6 +96,16 @@ const SPECS = {
     ["Checkout", "shows the cart page", null],
   ],
   "flaky.cy.js": [["Flaky", "passes on retry", null, undefined, 1]],
+  // Not in the fixture project: tests that need it write the spec file.
+  "retried.cy.js": [
+    [
+      "Retried",
+      "fails every attempt",
+      "expected true to be false",
+      "AssertionError: expected true to be false\n    at Context.eval (webpack://shop/./cypress/e2e/retried.cy.js:2:5)",
+      2,
+    ],
+  ],
   "support.cy.js": [
     [
       "Support",
@@ -214,7 +224,16 @@ c.unref();`,
     if (extraConfig.screenshotsFolder) {
       const dir = path.join(extraConfig.screenshotsFolder, name);
       fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, `${test.fullTitle.replace(/ /, " -- ")} (failed).png`), PNG);
+      // One screenshot per attempt, named like Cypress names them; earlier
+      // attempts are older files.
+      const attempts = test.retries + 1;
+      for (let attempt = 1; attempt <= attempts; attempt++) {
+        const suffix = attempt > 1 ? ` (attempt ${attempt})` : "";
+        const file = path.join(dir, `${test.fullTitle.replace(/ /, " -- ")} (failed)${suffix}.png`);
+        fs.writeFileSync(file, PNG);
+        const time = Date.now() / 1000 - (attempts - attempt);
+        fs.utimesSync(file, time, time);
+      }
     }
     if (wrapped && runDir) {
       const page = PAGES[test.base] ?? { url: "http://localhost:3000/", outline: "body", inventory: [], console: [], network: [], commands: [] };
