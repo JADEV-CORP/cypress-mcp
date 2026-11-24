@@ -24,8 +24,6 @@ export type {
   ConsoleEntry,
   FailedRequest,
   CommandEntry,
-  DiscoveryResult,
-  SpecSummary,
   SpecAnalysis,
   DescribeBlock,
 } from "./results.js";
@@ -35,7 +33,6 @@ import type { ProcessManager } from "../services/process-manager.js";
 import type { OutputParser } from "../services/output-parser.js";
 import type { ConfigLoader } from "../services/config-loader.js";
 import type { SpecFinder } from "../services/spec-finder.js";
-import type { ScreenshotResolver } from "../services/screenshot-resolver.js";
 import type { StateStore } from "../services/state-store.js";
 import type { Logger } from "../utils/logger.js";
 import type { ProjectRegistry } from "../services/projects.js";
@@ -56,7 +53,6 @@ export interface ToolContext {
   readonly outputParser: OutputParser;
   readonly configLoader: ConfigLoader;
   readonly specFinder: SpecFinder;
-  readonly screenshotResolver: ScreenshotResolver;
   readonly stateStore: StateStore;
   readonly logger: Logger;
 }

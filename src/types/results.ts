@@ -118,22 +118,6 @@ export interface CommandEntry {
   readonly state: string;
 }
 
-/** Discovery result for cypress_discover */
-export interface DiscoveryResult {
-  readonly projectRoot: string;
-  readonly configFile: string;
-  readonly specCount: number;
-  readonly totalTests: number;
-  readonly specs: readonly SpecSummary[];
-}
-
-export interface SpecSummary {
-  readonly file: string;
-  readonly tests: number;
-  readonly describes: readonly string[];
-  readonly testNames: readonly string[];
-}
-
 /** Detailed analysis of a single spec file */
 export interface SpecAnalysis {
   readonly file: string;

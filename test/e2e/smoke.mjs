@@ -49,7 +49,8 @@ async function call(name, args = {}, options = {}) {
   });
   return {
     text: res.content[0].text,
-    ...(res.structuredContent ?? JSON.parse(res.content[0].text)),
+    // Absent when the SDK rejects the arguments before the tool runs.
+    ...res.structuredContent,
     isError: res.isError === true,
   };
 }
@@ -62,7 +63,7 @@ async function check(name, fn) {
 }
 
 try {
-  await check("lists 4 tools by default and 14 with --caps all", async () => {
+  await check("lists 4 tools by default and 7 with --caps all", async () => {
     const plain = await connect();
     try {
       const { tools } = await plain.listTools();
@@ -74,7 +75,7 @@ try {
       await plain.close();
     }
     const { tools } = await client.listTools();
-    assert.equal(tools.length, 14);
+    assert.equal(tools.length, 7);
   });
 
   await check("doctor finds Cypress and loads the config", async () => {
@@ -93,13 +94,13 @@ try {
     assert.equal(context?.status, "ok", doctor.text);
   });
 
-  await check("list_specs and the legacy discover count the same tests", async () => {
-    const discover = await call("cypress_discover");
-    const list = await call("cypress_list_specs");
-    const counts = (specs) =>
-      Object.fromEntries(specs.map((s) => [s.file, s.tests]).sort());
-    assert.deepEqual(counts(list.data.specs), counts(discover.data.specs));
-    assert.equal(counts(list.data.specs)[spec], 4);
+  await check("list_specs and analyze_spec count the same tests", async () => {
+    const list = await call("cypress_list_specs", { titles: true });
+    const math = list.data.specs.find((s) => s.file === spec);
+    assert.equal(math?.tests, 4, list.text);
+    assert.equal(math.titles.length, 4, list.text);
+    const analyzed = await call("cypress_analyze_spec", { spec });
+    assert.equal(analyzed.text.split("\n")[0], `${spec}: 4 test(s)`, analyzed.text);
   });
 
   let failedRun;
@@ -156,10 +157,16 @@ try {
     assert.equal(run.data.closestMatches[0], 'Math fails & shows "quotes"');
   });
 
-  await check("the legacy rerun_last still replays a run", async () => {
-    const rerun = await call("cypress_rerun_last", { runId: failedRun.runId });
-    assert.equal(rerun.previousRunId, failedRun.runId);
-    assert.equal(rerun.data.stats.failing, 1);
+  await check("the failure's file:line reruns only the failing test", async () => {
+    // What replaced cypress_rerun_last: run again from the reported location.
+    const [failure] = failedRun.data.failures;
+    const line = /:(\d+)(?::\d+)?$/.exec(failure.location)?.[1];
+    assert.ok(line, failure.location);
+    const rerun = await call("cypress_run", { spec: `${spec}:${line}` });
+    assert.notEqual(rerun.runId, failedRun.runId);
+    assert.deepEqual(rerun.data.titles, ['Math fails & shows "quotes"'], rerun.text);
+    assert.equal(rerun.data.stats.tests, 1, rerun.text);
+    assert.equal(rerun.data.stats.failing, 1, rerun.text);
   });
 
   await check("rejects a spec outside the project", async () => {

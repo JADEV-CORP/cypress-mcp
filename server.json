@@ -28,7 +28,7 @@
         {
           "type": "named",
           "name": "--caps",
-          "description": "Optional tool groups, comma separated: analyze, config, legacy (the 0.2 tool names), or all.",
+          "description": "Optional tool groups, comma separated: analyze, config, or all.",
           "format": "string",
           "isRequired": false
         }

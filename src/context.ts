@@ -4,11 +4,9 @@ import { ConfigLoader } from "./services/config-loader.js";
 import { ProcessManager } from "./services/process-manager.js";
 import { OutputParser } from "./services/output-parser.js";
 import { SpecFinder } from "./services/spec-finder.js";
-import { ScreenshotResolver } from "./services/screenshot-resolver.js";
 import { StateStore } from "./services/state-store.js";
 import { ProjectRegistry } from "./services/projects.js";
 import path from "node:path";
-import { DEFAULT_CONFIG } from "./types/config.js";
 import type { ToolContext } from "./types/index.js";
 import type { Logger } from "./utils/logger.js";
 
@@ -46,17 +44,6 @@ function projectContext(
     outputParser: new OutputParser(logger),
     configLoader,
     specFinder: new SpecFinder(projectRoot, logger),
-    screenshotResolver: new ScreenshotResolver(
-      projectRoot,
-      async () => {
-        try {
-          return (await configLoader.load()).screenshotsDir;
-        } catch {
-          return DEFAULT_CONFIG.screenshotsDir;
-        }
-      },
-      logger,
-    ),
     stateStore,
     logger,
   };

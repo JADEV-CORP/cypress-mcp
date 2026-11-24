@@ -21,29 +21,11 @@ import { register as analyzeSpec } from "./discovery/analyze-spec.js";
 import { register as getConfig } from "./core/get-config.js";
 import { register as getEnv } from "./setup/get-env.js";
 
-// --caps legacy: the 0.2.x names, deprecated, removed in 0.5
-import { register as discover } from "./discovery/discover.js";
-import { register as runSpec } from "./core/run-spec.js";
-import { register as runTest } from "./core/run-test.js";
-import { register as rerunLast } from "./core/rerun-last.js";
-import { register as getLastRun } from "./debug/get-last-run.js";
-import { register as getFailureContext } from "./debug/get-failure-context.js";
-import { register as getScreenshot } from "./debug/get-screenshot.js";
-
 type Register = (server: McpServer, ctx: ToolContext) => void;
 
 const GROUPS: Readonly<Record<Capability, readonly Register[]>> = {
   analyze: [analyzeSpec],
   config: [getConfig, getEnv],
-  legacy: [
-    discover,
-    runSpec,
-    runTest,
-    rerunLast,
-    getLastRun,
-    getFailureContext,
-    getScreenshot,
-  ],
 };
 
 /**
@@ -60,7 +42,7 @@ export function registerAllTools(
   listSpecs(server, ctx);
   doctor(server, ctx);
 
-  for (const cap of ["analyze", "config", "legacy"] as const) {
+  for (const cap of ["analyze", "config"] as const) {
     if (caps.has(cap)) {
       for (const register of GROUPS[cap]) register(server, ctx);
     }

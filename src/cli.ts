@@ -64,7 +64,7 @@ complete (run), a check failed (doctor); 2 bad arguments or setup error
 
 Without a command, cypress-mcp is the MCP server on stdio, started by an MCP
 client:
-  cypress-mcp [--cwd <dir>] [--caps analyze,config,legacy|all] [--verbose]`;
+  cypress-mcp [--cwd <dir>] [--caps analyze,config|all] [--verbose]`;
 
 /** Printed instead of starting the server when a person runs it in a terminal. */
 const SERVER_NOTE = `cypress-mcp is an MCP server: an MCP client (Claude Code, Cursor, VS Code...)

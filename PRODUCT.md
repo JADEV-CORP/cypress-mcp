@@ -15,7 +15,6 @@ The agent calls tools; cypress-mcp starts Cypress with the project's own config,
 | Default | `cypress_run` (specs, `path:line`, globs; `testName`, `repeat`, `component`, `project`), `cypress_get_failure` (a run's failures, page, tests, screenshots or output, by `runId`), `cypress_list_specs`, `cypress_doctor` |
 | `--caps analyze` | `cypress_analyze_spec` |
 | `--caps config` | `cypress_get_config`, `cypress_get_env` |
-| `--caps legacy` | The 0.2 names, until 0.5 |
 
 Runs report progress per test to clients that ask for it, stop when the client cancels the request, and keep their partial results when they hit the timeout. Runs can be recorded to Cypress Cloud (`record: true`); the result carries the Cloud run URL that Cypress Cloud MCP tools accept. No tool name overlaps with Cypress Cloud MCP, so agents can load both.
 

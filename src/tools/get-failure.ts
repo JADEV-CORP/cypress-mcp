@@ -349,7 +349,7 @@ function pageView(
 }
 
 function failureData(context: FailureContext, show: (file: string) => string) {
-  const { stackHint: _stackHint, page, ...rest } = context;
+  const { page, ...rest } = context;
   return {
     ...rest,
     spec: show(rest.spec),

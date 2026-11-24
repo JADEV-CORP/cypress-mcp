@@ -1,10 +1,9 @@
 // Copyright (c) 2026 JADEV GROUP SARL
 // SPDX-License-Identifier: Apache-2.0
 
-// One result shape for every tool. The text block is what the agent reads
-// (compact lines for the default tools, the 0.2.x JSON envelope for the legacy
-// tools); structuredContent carries the same envelope as data, so every tool,
-// error or not, returns { ok, tool, summary, data, nextActions }.
+// One result shape for every tool. The text block is what the agent reads, in
+// compact lines; structuredContent carries the same envelope as data, so every
+// tool, error or not, returns { ok, tool, summary, data, nextActions }.
 import { z } from "zod";
 import type { CallToolResult, ToolAnnotations } from "@modelcontextprotocol/server";
 import { CypressMcpError, InternalError } from "../utils/errors.js";
@@ -16,8 +15,6 @@ export interface Envelope {
   readonly tool: string;
   readonly runId?: string;
   readonly summary: string;
-  /** Legacy cypress_rerun_last: the run it replayed */
-  readonly previousRunId?: string;
   readonly data: unknown;
   readonly nextActions: readonly string[];
 }
@@ -72,20 +69,6 @@ export function textResult(
   };
 }
 
-/** The 0.2.x JSON text envelope, kept for the deprecated tool names. */
-export function legacyResult(
-  envelope: Envelope,
-  isError = false,
-  pretty = true,
-): CallToolResult {
-  return {
-    content: [
-      { type: "text", text: JSON.stringify(envelope, null, pretty ? 2 : undefined) },
-    ],
-    ...(isError ? { isError: true } : {}),
-  };
-}
-
 /**
  * Next steps for errors that have one. Nothing here sends the agent to
  * cypress_doctor: it launches Cypress (about 15 s) and does not help with a
@@ -105,15 +88,6 @@ const NEXT_ACTIONS_BY_CODE: Readonly<Record<string, readonly string[]>> = {
   CANCELLED: [],
 };
 
-/** The legacy tools keep naming their own tools in next actions. */
-const LEGACY_NEXT_ACTIONS_BY_CODE: Readonly<Record<string, readonly string[]>> = {
-  ...NEXT_ACTIONS_BY_CODE,
-  TITLE_FILTER_UNAVAILABLE: ["cypress_run_spec"],
-  RUN_NOT_FOUND: ["cypress_run_spec"],
-  RECORD_KEY_MISSING: ["cypress_get_config"],
-  INVALID_ARGUMENT: ["Fix the argument as the summary says and call the tool again"],
-};
-
 function toKnownError(err: unknown, logger?: Logger): CypressMcpError {
   if (err instanceof CypressMcpError) {
     return err;
@@ -126,38 +100,23 @@ function toKnownError(err: unknown, logger?: Logger): CypressMcpError {
   return new InternalError(err);
 }
 
-export function errorEnvelope(
-  tool: string,
-  err: CypressMcpError,
-  legacy: boolean,
-): Envelope {
-  const table = legacy ? LEGACY_NEXT_ACTIONS_BY_CODE : NEXT_ACTIONS_BY_CODE;
+function errorEnvelope(tool: string, err: CypressMcpError): Envelope {
   return {
     ok: false,
     tool,
     summary: err.message,
     data: err.toJSON(),
-    nextActions: [...(table[err.code] ?? [])],
+    nextActions: [...(NEXT_ACTIONS_BY_CODE[err.code] ?? [])],
   };
 }
 
-/** Error result for the default tools: one text line plus the envelope. */
+/** Error result of every tool: one text line plus the envelope. */
 export function errorResult(tool: string, err: unknown, logger?: Logger): CallToolResult {
   const known = toKnownError(err, logger);
-  const envelope = errorEnvelope(tool, known, false);
+  const envelope = errorEnvelope(tool, known);
   const lines = [`Error ${known.code}: ${known.message}`];
   if (known.suggestion && envelope.nextActions.length === 0) {
     lines.push(known.suggestion);
   }
   return textResult(finish(lines, envelope.nextActions), envelope, true);
-}
-
-/** Error result for the legacy tools: the 0.2.x JSON envelope, with isError. */
-export function legacyErrorResult(
-  tool: string,
-  err: unknown,
-  logger?: Logger,
-): CallToolResult {
-  const known = toKnownError(err, logger);
-  return legacyResult(errorEnvelope(tool, known, true), true, false);
 }

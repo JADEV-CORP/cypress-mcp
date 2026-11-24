@@ -11,17 +11,18 @@ export const CAPABILITIES = {
   analyze: ["cypress_analyze_spec"],
   /** cypress_get_config and cypress_get_env: resolved config, env keys */
   config: ["cypress_get_config", "cypress_get_env"],
-  /** The 0.2.x tool names, replaced by cypress_run, cypress_get_failure and cypress_list_specs */
-  legacy: [
-    "cypress_discover",
-    "cypress_run_spec",
-    "cypress_run_test",
-    "cypress_rerun_last",
-    "cypress_get_last_run",
-    "cypress_get_failure_context",
-    "cypress_get_screenshot",
-  ],
 } as const;
+
+/**
+ * Groups that no longer exist. A client config written for an older version
+ * still passes them, so the startup warning says what happened to them.
+ */
+const REMOVED_CAPS: ReadonlyMap<string, string> = new Map([
+  [
+    "legacy",
+    "legacy was removed in 0.5: the README maps each 0.2 tool name to its replacement, https://github.com/jams4code/cypress-mcp#upgrading",
+  ],
+]);
 
 export type Capability = keyof typeof CAPABILITIES;
 
@@ -64,13 +65,24 @@ export function parseCaps(
   for (const name of names) {
     if (name === "all") {
       for (const cap of Object.keys(CAPABILITIES) as Capability[]) caps.add(cap);
-    } else if (name in CAPABILITIES) {
+    } else if (Object.hasOwn(CAPABILITIES, name)) {
+      // hasOwn, not `in`: "constructor" is not a group.
       caps.add(name as Capability);
     } else {
       unknown.push(name);
     }
   }
   return { caps, unknown };
+}
+
+/** Details of the startup warning for `--caps` names that are not a group. */
+export function unknownCapsWarning(unknown: readonly string[]): Record<string, unknown> {
+  const notes = unknown.flatMap((name) => REMOVED_CAPS.get(name) ?? []);
+  return {
+    unknown: [...unknown],
+    known: [...Object.keys(CAPABILITIES), "all"],
+    ...(notes.length > 0 ? { note: notes.join(" ") } : {}),
+  };
 }
 
 function split(value: string): string[] {

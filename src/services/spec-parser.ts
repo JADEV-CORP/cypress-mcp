@@ -1,8 +1,8 @@
 // Copyright (c) 2026 JADEV GROUP SARL
 // SPDX-License-Identifier: Apache-2.0
 
-// One static parser for describe/it blocks, shared by cypress_discover,
-// cypress_analyze_spec, cypress_list_specs and cypress_run_test. Regexes over
+// One static parser for describe/it blocks, shared by cypress_analyze_spec,
+// cypress_list_specs and the file:line targets of cypress_run. Regexes over
 // the raw text kept finding tests inside strings and calls such as
 // cy.visit("..."), so this scans the source once and skips strings, comments
 // and regex literals. It is not a JavaScript parser: a title built at runtime

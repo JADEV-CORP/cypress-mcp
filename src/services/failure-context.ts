@@ -27,8 +27,6 @@ export interface FailureContext {
   readonly excerpt?: string;
   /** Stack frames without Cypress internals */
   readonly stack: string;
-  /** Stack line in user code, as 0.2.x returned it (legacy tools) */
-  readonly stackHint: string;
   /** The page when the test failed: untrusted data from the app */
   readonly page?: PageContext;
 }
@@ -83,7 +81,6 @@ export async function buildFailureContexts(
           ? { excerpt: excerptAround(source, where.line, radius) }
           : {}),
         stack: userStack(failure.stack),
-        stackHint: extractStackHint(failure.stack),
         ...(failure.page ? { page: failure.page } : {}),
       };
     }),
@@ -140,20 +137,6 @@ function userStack(stack: string): string {
     .join("\n")
     .trim();
   return kept.length > MAX_STACK_CHARS ? `${kept.slice(0, MAX_STACK_CHARS)}...` : kept;
-}
-
-/** The most useful stack line: the first that points to user code. */
-function extractStackHint(stack: string): string {
-  const lines = stack.split("\n").map((l) => l.trim());
-  const userLine = lines.find(
-    (l) =>
-      l.includes(".cy.ts") ||
-      l.includes(".cy.js") ||
-      l.includes("cypress/e2e") ||
-      l.includes("cypress/support"),
-  );
-  if (userLine) return userLine;
-  return lines.find((l) => l.startsWith("at ")) ?? lines[0] ?? "";
 }
 
 /** A file inside the project, or undefined when it is outside or unreadable. */

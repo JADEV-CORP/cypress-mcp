@@ -3,7 +3,7 @@
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { createServer, SERVER_VERSION } from "./server.js";
 import { createToolContext } from "./context.js";
-import { CAPABILITIES, parseCaps } from "./caps.js";
+import { parseCaps, unknownCapsWarning } from "./caps.js";
 import { runCommand } from "./cli.js";
 import { createLogger } from "./utils/logger.js";
 import { resolveProjectRoot } from "./utils/paths.js";
@@ -31,10 +31,7 @@ async function startServer(argv: string[]): Promise<void> {
     version: SERVER_VERSION,
   });
   if (unknown.length > 0) {
-    logger.warn("Ignoring unknown --caps values", {
-      unknown,
-      known: [...Object.keys(CAPABILITIES), "all"],
-    });
+    logger.warn("Ignoring unknown --caps values", unknownCapsWarning(unknown));
   }
 
   const ctx = createToolContext(cwd, logger);

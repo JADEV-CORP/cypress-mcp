@@ -275,7 +275,7 @@ export class ConfigLoader {
     for (const file of filesToScan) {
       try {
         // Tracked so that wiring @cypress/grep into the support file mid
-        // session enables cypress_run_test without a restart.
+        // session enables testName without a restart.
         const content = await this.readTracked(file);
         if (TITLE_FILTER_PATTERN.test(content)) {
           return true;

@@ -94,10 +94,6 @@ export class StateStore {
     return record;
   }
 
-  getLastRun(): RunRecord | null {
-    return this.lastRun;
-  }
-
   /** A stored run by id, "last" for the latest run, or null when unknown. */
   getRun(runId: string = LAST_RUN): RunRecord | null {
     if (runId === LAST_RUN) {

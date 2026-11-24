@@ -2,8 +2,8 @@
 // against a temp project whose node_modules/cypress is the fake CLI in
 // test/fixtures/fake-cypress. Covers what only shows end to end: the compact
 // text agents read, structuredContent against each tool's outputSchema,
-// runIds, progress, cancellation, timeouts, the arguments passed to Cypress,
-// and the legacy tool names behind --caps. Needs `npm run build` first.
+// runIds, progress, cancellation, timeouts and the arguments passed to
+// Cypress. Needs `npm run build` first.
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
@@ -28,7 +28,6 @@ interface Envelope {
   summary: string;
   data: Record<string, unknown>;
   nextActions: string[];
-  previousRunId?: string;
 }
 
 interface Called {
@@ -53,15 +52,6 @@ async function call(
     text: content[0]!.text,
     structured: result.structuredContent as unknown as Envelope,
   };
-}
-
-/** Calls a legacy tool, whose text is the 0.2.x JSON envelope. */
-async function callLegacy(
-  name: string,
-  args: Record<string, unknown> = {},
-): Promise<{ isError: boolean; body: Envelope }> {
-  const { isError, text } = await call(name, args);
-  return { isError, body: JSON.parse(text) as Envelope };
 }
 
 /** Arguments of every `cypress run` the server started, oldest first. */
@@ -336,17 +326,6 @@ describe("cypress_run with a testName that matches nothing (B1)", () => {
 
       const byLine = await call("cypress_run", { spec: "cypress/e2e/skipped.cy.js:3" });
       expect(byLine.structured.data["status"]).toBe("skipped");
-
-      // The deprecated tool must not call it a pass either.
-      const legacy = await callLegacy("cypress_run_test", {
-        spec: "cypress/e2e/skipped.cy.js",
-        testName: "filters by price",
-      });
-      expect(legacy.isError).toBe(true);
-      expect(legacy.body.data).toMatchObject({
-        code: "TEST_SKIPPED",
-        skipped: ["Search filters by price"],
-      });
     } finally {
       fs.rmSync(skippedSpec, { force: true });
     }
@@ -696,7 +675,7 @@ describe("errors", () => {
 });
 
 describe("discovery tools agree (B5)", () => {
-  it("counts the same tests in list_specs, analyze_spec and the legacy discover", async () => {
+  it("counts the same tests in list_specs and analyze_spec", async () => {
     const list = await call("cypress_list_specs");
     const specs = list.structured.data["specs"] as { file: string; tests: number }[];
     expect(specs.map((s) => [s.file, s.tests])).toEqual([
@@ -719,14 +698,6 @@ describe("discovery tools agree (B5)", () => {
       "  Checkout logs in with valid credentials",
       "  Checkout shows the cart page",
     ]);
-
-    const discover = await callLegacy("cypress_discover");
-    expect(
-      (discover.body.data["specs"] as { file: string; tests: number }[]).map((s) => [
-        s.file,
-        s.tests,
-      ]),
-    ).toEqual(specs.map((s) => [s.file, s.tests]));
 
     const analyze = await call("cypress_analyze_spec", {
       spec: "cypress/e2e/checkout.cy.js",
@@ -769,60 +740,6 @@ describe("cypress_get_env (B7)", () => {
     const none = await call("cypress_get_env");
     expect(none.isError).toBe(false);
     expect(none.structured.data["exists"]).toBe(false);
-  });
-});
-
-describe("legacy tool names (--caps legacy)", () => {
-  it("keep the 0.2 JSON envelope and say they are deprecated", async () => {
-    const { tools } = await client.listTools();
-    const runSpec = tools.find((t) => t.name === "cypress_run_spec");
-    expect(runSpec?.description).toMatch(
-      /^Deprecated, removed in 0\.5: use cypress_run\./,
-    );
-
-    const run = await callLegacy("cypress_run_spec", {
-      spec: "cypress/e2e/checkout.cy.js",
-    });
-    expect(run.body).toMatchObject({
-      ok: true,
-      tool: "cypress_run_spec",
-      summary: "2 failing, 1 passing in cypress/e2e/checkout.cy.js",
-      nextActions: ["cypress_get_failure_context", "cypress_get_screenshot"],
-    });
-
-    const context = await callLegacy("cypress_get_failure_context", {
-      runId: run.body.runId,
-    });
-    const failures = context.body.data["failures"] as {
-      location?: string;
-      specExcerpt?: string;
-    }[];
-    expect(failures[0]?.location).toBe("cypress/e2e/checkout.cy.js:5:37");
-    expect(failures[1]?.specExcerpt).toContain(
-      ">>> 10:     cy.get('[data-cy=\"login-button\"]').click();",
-    );
-
-    const rerun = await callLegacy("cypress_rerun_last", { runId: run.body.runId });
-    expect(rerun.body.previousRunId).toBe(run.body.runId);
-
-    const last = await callLegacy("cypress_get_last_run", { runId: run.body.runId });
-    expect(last.body.data["spec"]).toBe("cypress/e2e/checkout.cy.js");
-
-    const miss = await callLegacy("cypress_run_test", {
-      spec: "cypress/e2e/checkout.cy.js",
-      testName: "does not exist anywhere",
-    });
-    expect(miss.isError).toBe(true);
-    expect(miss.body.data["code"]).toBe("NO_TEST_MATCHED");
-  });
-
-  it("report a spec that does not compile with isError now", async () => {
-    const broken = await callLegacy("cypress_run_spec", {
-      spec: "cypress/e2e/broken.cy.js",
-    });
-    expect(broken.isError).toBe(true);
-    expect(broken.body.ok).toBe(false);
-    expect(broken.body.data["errorKind"]).toBe("compile");
   });
 });
 

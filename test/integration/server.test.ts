@@ -28,13 +28,6 @@ const ALL_TOOLS = [
   "cypress_analyze_spec",
   "cypress_get_config",
   "cypress_get_env",
-  "cypress_discover",
-  "cypress_run_spec",
-  "cypress_run_test",
-  "cypress_rerun_last",
-  "cypress_get_last_run",
-  "cypress_get_failure_context",
-  "cypress_get_screenshot",
 ];
 
 const READ_TOOLS = new Set([
@@ -44,10 +37,6 @@ const READ_TOOLS = new Set([
   "cypress_analyze_spec",
   "cypress_get_config",
   "cypress_get_env",
-  "cypress_discover",
-  "cypress_get_last_run",
-  "cypress_get_failure_context",
-  "cypress_get_screenshot",
 ]);
 
 function serverEnv(): Record<string, string> {
@@ -71,10 +60,14 @@ async function connect(...extraArgs: string[]): Promise<Client> {
   return client;
 }
 
-function sendJsonRpc(messages: object[]): Promise<{ stdout: string; stderr: string }> {
+function sendJsonRpc(
+  messages: object[],
+  extraArgs: string[] = [],
+): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn("node", [SERVER_PATH, "--cwd", FIXTURE_PATH], {
+    const child = spawn("node", [SERVER_PATH, "--cwd", FIXTURE_PATH, ...extraArgs], {
       stdio: ["pipe", "pipe", "pipe"],
+      env: serverEnv(),
     });
 
     const stdoutChunks: Buffer[] = [];
@@ -137,7 +130,7 @@ describe("Server Integration", () => {
     }
   });
 
-  it("adds the analyze, config and legacy tools with --caps all, in a fixed order", async () => {
+  it("adds the analyze and config tools with --caps all, in a fixed order", async () => {
     const client = await connect("--caps", "all");
     try {
       const first = await client.listTools();
@@ -147,6 +140,39 @@ describe("Server Integration", () => {
     } finally {
       await client.close();
     }
+  });
+
+  it("warns that --caps legacy was removed in 0.5 and serves the default tools", async () => {
+    const { stdout, stderr } = await sendJsonRpc(
+      [
+        {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: {
+            protocolVersion: "2024-11-05",
+            capabilities: {},
+            clientInfo: { name: "test", version: "1.0.0" },
+          },
+        },
+        { jsonrpc: "2.0", method: "notifications/initialized" },
+        { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
+      ],
+      ["--caps", "legacy"],
+    );
+
+    const warning = stderr.split("\n").find((line) => line.includes("WARN"));
+    expect(warning).toContain("Ignoring unknown --caps values");
+    expect(warning).toContain("legacy was removed in 0.5");
+    const list = stdout
+      .trim()
+      .split("\n")
+      .map(
+        (line) =>
+          JSON.parse(line) as { id?: number; result?: { tools?: { name: string }[] } },
+      )
+      .find((message) => message.id === 2);
+    expect(list?.result?.tools?.map((t) => t.name)).toEqual(DEFAULT_TOOLS);
   });
 
   it("reads caps from CYPRESS_MCP_CAPS and --caps=", async () => {

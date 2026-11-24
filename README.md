@@ -67,7 +67,7 @@ Some MCP clients start servers with only a few environment variables. If Cypress
 
 The package has no dependencies to install (they are bundled), so a first `npx` run downloads one file and starts in a second or two.
 
-Add `--caps` for more tools: `--caps analyze,config`, `--caps legacy` for the 0.2 tool names, or `--caps all`. See [Tools](#tools).
+Add `--caps` for more tools: `--caps analyze,config` or `--caps all`. See [Tools](#tools).
 
 ### Timeouts
 
@@ -359,7 +359,6 @@ Optional groups, with `--caps <group>[,<group>]`, `--caps=all`, or the `CYPRESS_
 |-------|-------|
 | `analyze` | `cypress_analyze_spec`: describe/it outline with line numbers, `cy.visit` URLs, intercepts, fixtures, custom commands |
 | `config` | `cypress_get_config`: resolved config and Cloud status. `cypress_get_env`: keys and value types of `cypress.env.json`, never the values |
-| `legacy` | The 0.2 tool names, deprecated and removed in 0.5 (see below) |
 
 Every result has a short text block, which is what the agent reads, and the full data in `structuredContent`, described by the tool's `outputSchema`. Screenshots come as `resource_link` items that `resources/read` serves (scaled to 1,000 px), so clients without file access can open them. Read tools are annotated `readOnlyHint: true` (Claude Code runs them in parallel); `cypress_run` is `destructiveHint: false`, `idempotentHint: false`, `openWorldHint: true`. Errors are tool results with `isError: true` and the same envelope (`ok`, `tool`, `summary`, `data.code`, `nextActions`).
 
@@ -389,13 +388,15 @@ Each run gets a `runId` (`run_1`, `run_2`, ...), kept in memory for the life of 
 
 ### Upgrading
 
+From 0.4 to 0.5: the 0.2 tool names and the `--caps legacy` group are removed. A client that still passes `--caps legacy` gets the default tools, and the server log warns that the group is gone. The table below maps each 0.2 name to the tool that replaced it.
+
 From 0.4.0 to 0.4.1: the failure list of a run sits in one `<page data ...>` fence, not only the page context; `cypress_run` rejects unknown arguments and runs every spec without `spec`; a skipped test that matches is status `skipped`, not `no_match`; a non-zero Cypress exit with no failure is an error, not a pass.
 
 From 0.3 to 0.4: screenshots of MCP runs are in the run's folder under `node_modules/.cache/cypress-mcp/runs/`, not in the project's `cypress/screenshots`; the reporter is set by the wrapper config instead of `--reporter`, with the project's own kept; `testName` matches through the browser runtime, so `@cypress/grep` is no longer needed (and no longer receives the filter). Set `"failureContext": false` to get the 0.3 behaviour back.
 
-From 0.2: the 0.2 tool names still work with `--caps legacy` until 0.5. They return the 0.2 JSON text and their descriptions say they are deprecated.
+From 0.2: the 0.2 tool names were replaced in 0.3 and are gone since 0.5.
 
-| 0.2 | 0.3 |
+| 0.2 | 0.3 and later |
 |-----|-----|
 | `cypress_run_spec {spec}` | `cypress_run {spec}` |
 | `cypress_run_test {spec, testName}` | `cypress_run {spec, testName}` |

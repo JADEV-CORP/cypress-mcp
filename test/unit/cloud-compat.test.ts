@@ -27,9 +27,7 @@ const CLOUD_MCP_TOOLS = [
   "submit_mcp_feedback",
 ];
 
-function registeredToolNames(
-  caps: Capability[] = ["analyze", "config", "legacy"],
-): string[] {
+function registeredToolNames(caps: Capability[] = ["analyze", "config"]): string[] {
   const names: string[] = [];
   const server = {
     registerTool: (name: string) => names.push(name),
@@ -66,8 +64,8 @@ describe("tool sets", () => {
       ]);
     }
     // The order does not depend on the order caps were given in.
-    expect(registeredToolNames(["legacy", "analyze", "config"])).toEqual(
-      registeredToolNames(["analyze", "config", "legacy"]),
+    expect(registeredToolNames(["config", "analyze"])).toEqual(
+      registeredToolNames(["analyze", "config"]),
     );
   });
 });

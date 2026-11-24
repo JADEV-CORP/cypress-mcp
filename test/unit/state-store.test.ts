@@ -25,7 +25,7 @@ const mockArgs: CypressRunArgs = { spec: "cypress/e2e/spec.cy.ts" };
 describe("StateStore", () => {
   it("should return null when no runs recorded", () => {
     const store = new StateStore();
-    expect(store.getLastRun()).toBeNull();
+    expect(store.getRun()).toBeNull();
   });
 
   it("should record and retrieve a run with full metadata", () => {
@@ -46,7 +46,7 @@ describe("StateStore", () => {
     expect(record.stdoutTail).toBe("stdout");
     expect(record.stderrTail).toBe("stderr");
 
-    const last = store.getLastRun();
+    const last = store.getRun();
     expect(last).toBe(record);
   });
 
@@ -70,7 +70,7 @@ describe("StateStore", () => {
     store.recordRun("run_spec", "spec.cy.ts", mockArgs, mockResult, "", "");
     store.clear();
 
-    expect(store.getLastRun()).toBeNull();
+    expect(store.getRun()).toBeNull();
     expect(store.getScreenshots("spec.cy.ts")).toHaveLength(0);
   });
 
@@ -83,7 +83,7 @@ describe("StateStore", () => {
     };
     store.recordRun("run_test", "login.cy.ts", args, mockResult, "", "");
 
-    const last = store.getLastRun();
+    const last = store.getRun();
     expect(last?.args.grep).toBe("should login");
     expect(last?.args.browser).toBe("chrome");
   });

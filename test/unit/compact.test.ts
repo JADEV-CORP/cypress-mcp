@@ -59,7 +59,6 @@ function failure(index: number, error: string): FailureContext {
     location: `cypress/e2e/big.cy.js:${index + 1}:5`,
     screenshot: `${ROOT}/cypress/screenshots/big.cy.js/Big suite -- case ${index} (failed).png`,
     stack: "",
-    stackHint: "",
   };
 }
 
