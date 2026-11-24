@@ -109,6 +109,45 @@ describe("cypress-mcp run", () => {
     expect(cli(["run", "cypress/e2e/pass.cy.js", "--timeout", "soon"]).status).toBe(2);
   });
 
+  it("words next steps for a shell and prints absolute screenshot paths", () => {
+    const { stdout } = cli(["run", "cypress/e2e/checkout.cy.js"]);
+
+    // A CLI process keeps no runIds, so MCP tool names would be dead ends.
+    expect(stdout).not.toMatch(/cypress_\w+/);
+    expect(stdout.trim().split("\n").at(-1)).toBe(
+      "next: --json for source excerpts, diffs, stacks and each page outline",
+    );
+    // Absolute, so a terminal makes them clickable.
+    const shots = [...stdout.matchAll(/^ {3}screenshot: (.+)$/gm)].map((m) => m[1]!);
+    expect(shots).toHaveLength(2);
+    for (const shot of shots) {
+      expect(path.isAbsolute(shot), shot).toBe(true);
+      expect(fs.existsSync(shot), shot).toBe(true);
+    }
+    expect(stdout).not.toContain("screenshots in ");
+
+    const noMatch = cli(["run", "cypress/e2e/checkout.cy.js", "--test", "no such test"]);
+    expect(noMatch.stdout).toContain(
+      "next: --test with one of the titles above, or no --test for the whole spec",
+    );
+
+    const missing = cli(["run", "cypress/e2e/nope.cy.js"]);
+    expect(missing.stderr).toContain("cypress-mcp list");
+    expect(missing.stderr).not.toMatch(/cypress_\w+/);
+  });
+
+  it("adds source excerpts and stacks to the failures in --json", () => {
+    const { stdout } = cli(["run", "cypress/e2e/checkout.cy.js", "--json"]);
+    const envelope = JSON.parse(stdout) as {
+      nextActions: string[];
+      data: { failures: { excerpt?: string; stack?: string }[] };
+    };
+
+    expect(envelope.data.failures[1]!.excerpt).toContain(">>> 10:");
+    expect(envelope.data.failures[1]!.stack).toContain("checkout.cy.js:10:7");
+    expect(envelope.nextActions.join(" ")).not.toMatch(/cypress_\w+/);
+  });
+
   it("prints usage and the version", () => {
     const help = cli(["--help"]);
     expect(help.status).toBe(0);
@@ -144,6 +183,9 @@ describe("cypress-mcp doctor", () => {
       const broken = cli(["doctor", "--quick", "--cwd", empty]);
       expect(broken.status).toBe(1);
       expect(broken.stdout).toContain("fail Project: No cypress.config.*");
+      expect(broken.stdout).toContain(
+        "next: fix the fail lines above, then run cypress-mcp doctor again",
+      );
     } finally {
       fs.rmSync(empty, { recursive: true, force: true });
     }

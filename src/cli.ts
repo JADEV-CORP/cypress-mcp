@@ -12,10 +12,11 @@ import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import { createToolContext } from "./context.js";
 import { SERVER_VERSION } from "./server.js";
-import { executeCypressRun } from "./services/run-executor.js";
+import { executeCypressRun, type RunOutcome } from "./services/run-executor.js";
+import { buildFailureContexts } from "./services/failure-context.js";
 import { prepareRun } from "./tools/run-shared.js";
 import { abortAllRuns } from "./services/process-manager.js";
-import { runResult } from "./tools/run.js";
+import { EXCERPT_RADIUS, runResult, type RunData } from "./tools/run.js";
 import { doctorResult } from "./tools/project/doctor.js";
 import { listSpecsResult } from "./tools/core/list-specs.js";
 import type { ToolContext } from "./types/index.js";
@@ -232,8 +233,17 @@ async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
       notes: run.notes,
       signal: controller.signal,
     });
-    const result = await runResult(ctx, outcome, values.verbose === true);
-    print(io, result, values.json);
+    const result = await runResult(ctx, outcome, {
+      verbose: values.verbose === true,
+      cli: true,
+    });
+    if (values.json) {
+      io.out(
+        JSON.stringify(await withSource(outcome, result.structuredContent), null, 2),
+      );
+    } else {
+      print(io, result, false);
+    }
     return result.structuredContent.data.status === "passed" ? EXIT_PASSED : EXIT_FAILED;
   } catch (err) {
     return setupError(io, err);
@@ -260,10 +270,11 @@ async function doctorCli(argv: readonly string[], io: CliIo): Promise<number> {
   }
 
   try {
-    const result = await doctorResult(contextFor(io, values), {
-      quick: values.quick,
-      project: values.project,
-    });
+    const result = await doctorResult(
+      contextFor(io, values),
+      { quick: values.quick, project: values.project },
+      true,
+    );
     print(io, result, values.json);
     return result.structuredContent.data.healthy ? EXIT_PASSED : EXIT_FAILED;
   } catch (err) {
@@ -291,11 +302,11 @@ async function listCli(argv: readonly string[], io: CliIo): Promise<number> {
   }
 
   try {
-    const result = await listSpecsResult(contextFor(io, values), {
-      pattern: values.pattern,
-      titles: values.titles,
-      project: values.project,
-    });
+    const result = await listSpecsResult(
+      contextFor(io, values),
+      { pattern: values.pattern, titles: values.titles, project: values.project },
+      true,
+    );
     print(io, result, values.json);
     return EXIT_PASSED;
   } catch (err) {
@@ -340,13 +351,50 @@ function print(io: CliIo, result: CallToolResult, json: boolean | undefined): vo
   }
 }
 
+/**
+ * The run envelope with each failure's source excerpt and stack. An MCP
+ * client asks cypress_get_failure for them later; a CLI process keeps no runs.
+ */
+async function withSource(
+  outcome: RunOutcome,
+  envelope: { data: RunData },
+): Promise<{ data: RunData }> {
+  const { record } = outcome;
+  const contexts = await buildFailureContexts(record, record.projectRoot, EXCERPT_RADIUS);
+  const failures = envelope.data.failures.map((failure) => {
+    const context = contexts[failure.index - 1];
+    return {
+      ...failure,
+      ...(context?.excerpt ? { excerpt: context.excerpt } : {}),
+      ...(context?.stack ? { stack: context.stack } : {}),
+    };
+  });
+  return { ...envelope, data: { ...envelope.data, failures } };
+}
+
+/** Suggestions that name an MCP tool or argument, worded for the CLI. */
+const CLI_SUGGESTIONS: Readonly<Record<string, string>> = {
+  SPEC_NOT_FOUND: "Check the path. cypress-mcp list shows the specs.",
+  SPEC_OUTSIDE_PROJECT:
+    "Pass a spec path inside the project. cypress-mcp list shows the specs.",
+  CYPRESS_NOT_FOUND:
+    "Install Cypress in the project with 'npm install --save-dev cypress', then run cypress-mcp doctor.",
+  CONFIG_NOT_FOUND:
+    "Run it in the folder that holds cypress.config.*, or pass --cwd with that folder.",
+  PROJECT_REQUIRED: "Pass --project with one of the folders listed.",
+  BROWSER_CHECK_FAILED:
+    "Omit --browser to use the project's default browser, or run cypress-mcp doctor.",
+  TITLE_FILTER_UNAVAILABLE:
+    "Run without --test for the whole spec, or wire @cypress/grep into the project.",
+  INVALID_ARGUMENT: "Fix the argument and run the command again.",
+};
+
 /** Exit code for an error the user can fix; anything else is a bug and propagates. */
 function setupError(io: CliIo, err: unknown): number {
   if (!(err instanceof CypressMcpError)) {
     throw err;
   }
-  io.err(
-    `Error ${err.code}: ${err.message}${err.suggestion ? `\n${err.suggestion}` : ""}`,
-  );
+  const suggestion = CLI_SUGGESTIONS[err.code] ?? err.suggestion;
+  io.err(`Error ${err.code}: ${err.message}${suggestion ? `\n${suggestion}` : ""}`);
   return err.code === "CANCELLED" ? EXIT_FAILED : EXIT_USAGE;
 }

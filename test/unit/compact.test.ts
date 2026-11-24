@@ -146,6 +146,22 @@ describe("renderRun", () => {
     ]);
   });
 
+  it("gives the CLI absolute screenshot paths and points it at --json", () => {
+    const failures = Array.from({ length: 45 }, (_, i) => failure(i + 1, "no"));
+    const text = renderRun(
+      { type: "completed", record: record({ success: false }) },
+      failures,
+      { displayRoot: ROOT, nextActions: [], cli: true },
+    );
+    const lines = text.split("\n");
+
+    expect(lines[1]).toBe("1) Big suite case 1");
+    expect(lines[3]).toBe(`   screenshot: ${failures[0]!.screenshot}`);
+    expect(text).not.toContain("screenshots in");
+    expect(text).toContain(`${45 - MAX_LISTED_FAILURES} more failures, listed by --json`);
+    expect(text).not.toContain("cypress_get_failure");
+  });
+
   it("keeps an error to three clipped lines", () => {
     const long = ["first line", "x".repeat(1_000), "third", "fourth", "fifth"].join("\n");
     const text = renderRun(

@@ -70,10 +70,11 @@ export function register(server: McpServer, ctx: ToolContext): void {
 
 export type DoctorData = z.infer<typeof doctorDataSchema>;
 
-/** Text and structured result of the checks. Also used by the CLI. */
+/** Text and structured result of the checks. Also used by the CLI (`cli`). */
 export async function doctorResult(
   ctx: ToolContext,
   input: { quick?: boolean; project?: string },
+  cli = false,
 ): Promise<CallToolResult & { structuredContent: { data: DoctorData } }> {
   const launch = input.quick !== true;
   const checks = await checksFor(ctx, input.project, launch);
@@ -86,7 +87,9 @@ export async function doctorResult(
     : `${failed} problem(s) to fix${warned > 0 ? `, ${warned} warning(s)` : ""}`;
   const nextActions = healthy
     ? []
-    : ["fix the fail lines above, then call cypress_doctor again"];
+    : [
+        `fix the fail lines above, then ${cli ? "run cypress-mcp doctor" : "call cypress_doctor"} again`,
+      ];
   const lines = [
     summary,
     ...checks.map(
@@ -94,7 +97,7 @@ export async function doctorResult(
     ),
   ];
 
-  const result = textResult(finish(lines, nextActions), {
+  const result = textResult(finish(lines, nextActions, cli), {
     ok: healthy,
     tool: TOOL,
     summary,

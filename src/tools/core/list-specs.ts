@@ -57,10 +57,11 @@ export function register(server: McpServer, ctx: ToolContext): void {
   );
 }
 
-/** Text and structured result of the listing. Also used by the CLI. */
+/** Text and structured result of the listing. Also used by the CLI (`cli`). */
 export async function listSpecsResult(
   ctx: ToolContext,
   input: { pattern?: string; titles?: boolean; project?: string },
+  cli = false,
 ): Promise<CallToolResult> {
   const { pattern, titles } = input;
   // Only the caller's pattern is checked; the project's own specPattern is trusted.
@@ -108,7 +109,7 @@ export async function listSpecsResult(
       ? ["check the pattern, or the specPattern in the Cypress config"]
       : [];
 
-  return textResult(finish(lines, nextActions), {
+  return textResult(finish(lines, nextActions, cli), {
     ok: true,
     tool: TOOL,
     summary,

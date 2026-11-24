@@ -144,6 +144,8 @@ export function renderRun(
     displayRoot: string;
     verbose?: boolean;
     nextActions: readonly string[];
+    /** For the CLI: absolute screenshot paths (terminals make them clickable), --json for the rest */
+    cli?: boolean;
   },
 ): string {
   const { record } = outcome;
@@ -175,7 +177,7 @@ export function renderRun(
     lines.push(`cloud: ${result.cloud.runUrl}`);
   }
 
-  lines.push(...failureLines(failures, record, options.displayRoot));
+  lines.push(...failureLines(failures, record, options.displayRoot, options.cli));
 
   const flaky = result.tests.filter((test) => test.flaky);
   if (flaky.length > 0 && !options.verbose) {
@@ -191,7 +193,7 @@ export function renderRun(
     lines.push(...testLines(result.tests));
   }
 
-  return finish(lines, options.nextActions);
+  return finish(lines, options.nextActions, options.cli);
 }
 
 /**
@@ -207,15 +209,18 @@ function failureLines(
   failures: readonly FailureContext[],
   record: RunRecord,
   displayRoot: string,
+  cli = false,
 ): string[] {
   if (failures.length === 0) {
     return [];
   }
 
   const shown = failures.slice(0, MAX_LISTED_FAILURES);
-  const screenshotDir = commonDir(
-    shown.flatMap((failure) => (failure.screenshot ? [failure.screenshot] : [])),
-  );
+  const screenshotDir = cli
+    ? undefined
+    : commonDir(
+        shown.flatMap((failure) => (failure.screenshot ? [failure.screenshot] : [])),
+      );
   const lines: string[] = [];
   if (screenshotDir) {
     lines.push(`screenshots in ${relative(displayRoot, screenshotDir)}/`);
@@ -232,9 +237,11 @@ function failureLines(
         : "";
     blocks.push(`   ${where}${error}`);
     if (failure.screenshot) {
-      const shot = screenshotDir
-        ? path.basename(failure.screenshot)
-        : relative(displayRoot, failure.screenshot);
+      const shot = cli
+        ? failure.screenshot
+        : screenshotDir
+          ? path.basename(failure.screenshot)
+          : relative(displayRoot, failure.screenshot);
       blocks.push(`   screenshot: ${shot}`);
     }
     if (failure.page) {
@@ -249,7 +256,7 @@ function failureLines(
 
   if (failures.length > shown.length) {
     lines.push(
-      `... ${failures.length - shown.length} more failures, listed by cypress_get_failure`,
+      `... ${failures.length - shown.length} more failures, listed by ${cli ? "--json" : "cypress_get_failure"}`,
     );
   }
   return lines;
@@ -477,20 +484,27 @@ function compactArgs(record: RunRecord): Record<string, unknown> {
   };
 }
 
-/** Joins the lines, adds the next-step line and keeps the text under the cap. */
-export function finish(lines: readonly string[], nextActions: readonly string[]): string {
+/**
+ * Joins the lines, adds the next-step line and keeps the text under the cap.
+ * `cli`: the CLI prints it, where --json has the full data.
+ */
+export function finish(
+  lines: readonly string[],
+  nextActions: readonly string[],
+  cli = false,
+): string {
   const body = [...lines];
   if (nextActions.length > 0) {
     body.push(`next: ${nextActions.join("; ")}`);
   }
-  return capText(body.join("\n"));
+  return capText(body.join("\n"), cli);
 }
 
-export function capText(text: string): string {
+export function capText(text: string, cli = false): string {
   if (text.length <= MAX_TEXT_CHARS) {
     return text;
   }
-  return `${text.slice(0, MAX_TEXT_CHARS)}\n[cut at ${MAX_TEXT_CHARS} characters; the full data is in structuredContent]`;
+  return `${text.slice(0, MAX_TEXT_CHARS)}\n[cut at ${MAX_TEXT_CHARS} characters; the full data is in ${cli ? "--json" : "structuredContent"}]`;
 }
 
 export function relative(projectRoot: string, file: string): string {

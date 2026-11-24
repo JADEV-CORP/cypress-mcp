@@ -173,7 +173,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
           onProgress: progress.onProgress,
         });
         await progress.flush();
-        return await runResult(ctx, outcome, verbose === true);
+        return await runResult(ctx, outcome, { verbose: verbose === true });
       } catch (err) {
         return errorResult(TOOL, err, ctx.logger);
       }
@@ -185,16 +185,21 @@ export function register(server: McpServer, ctx: ToolContext): void {
 export async function runResult(
   ctx: ToolContext,
   outcome: RunOutcome,
-  verbose: boolean,
+  options: {
+    verbose: boolean;
+    /** Worded for the CLI: next steps without MCP tools, absolute screenshot paths */
+    cli?: boolean;
+  },
 ): Promise<CallToolResult & { structuredContent: { data: RunData } }> {
   const { record } = outcome;
   const failures = await buildFailureContexts(record, record.projectRoot, null);
   const status = runStatus(outcome);
-  const nextActions = runNextActions(outcome, status);
+  const nextActions = runNextActions(outcome, status, options.cli);
   const text = renderRun(outcome, failures, {
     displayRoot: ctx.serverRoot,
-    verbose,
+    verbose: options.verbose,
     nextActions,
+    cli: options.cli,
   });
   const data = runData(outcome, failures, status);
   const isError = status === "error" || status === "timeout" || status === "no_match";
@@ -291,21 +296,38 @@ function runData(
 /**
  * What to do next, by outcome. cypress_doctor launches Cypress (about 15 s)
  * and finds nothing wrong with a spec that fails or does not compile, so it
- * is only suggested when Cypress stopped for an unexplained reason.
+ * is only suggested when Cypress stopped for an unexplained reason. The CLI
+ * keeps no runs to look up by runId, so its steps name its own options:
+ * --json carries what cypress_get_failure adds.
  */
-export function runNextActions(outcome: RunOutcome, status: RunStatus): string[] {
+export function runNextActions(
+  outcome: RunOutcome,
+  status: RunStatus,
+  cli = false,
+): string[] {
   const { record } = outcome;
   const { result, runId } = record;
-  const failure = `cypress_get_failure {"runId":"${runId}"}`;
+  const failure = cli
+    ? "--json for source excerpts, diffs and stacks"
+    : `cypress_get_failure {"runId":"${runId}"}`;
   const actions: string[] = [];
+  const outlines = record.contextCaptured && result.failures.length > 1;
 
   switch (status) {
     case "failed":
-      actions.push(
-        record.contextCaptured && result.failures.length > 1
-          ? `${failure} for source excerpts and stacks; view "page" with failure n for the page outline`
-          : `${failure} for source excerpts, diffs and stacks`,
-      );
+      if (cli) {
+        actions.push(
+          outlines
+            ? "--json for source excerpts, diffs, stacks and each page outline"
+            : failure,
+        );
+      } else {
+        actions.push(
+          outlines
+            ? `${failure} for source excerpts and stacks; view "page" with failure n for the page outline`
+            : `${failure} for source excerpts, diffs and stacks`,
+        );
+      }
       break;
     case "passed":
       if (result.stats.flaky > 0) {
@@ -314,7 +336,9 @@ export function runNextActions(outcome: RunOutcome, status: RunStatus): string[]
       break;
     case "no_match":
       actions.push(
-        "cypress_run with testName set to one of the titles above, or without testName for the whole spec",
+        cli
+          ? "--test with one of the titles above, or no --test for the whole spec"
+          : "cypress_run with testName set to one of the titles above, or without testName for the whole spec",
       );
       break;
     case "skipped":
@@ -322,17 +346,23 @@ export function runNextActions(outcome: RunOutcome, status: RunStatus): string[]
         "remove .skip (or the this.skip() call) from the test, then run again",
       );
       break;
-    case "timeout":
+    case "timeout": {
+      const timeout = cli ? "--timeout" : "timeout";
       actions.push(
         result.runningTest
-          ? `fix the test that hung, or pass a larger timeout`
-          : "pass a larger timeout",
+          ? `fix the test that hung, or pass a larger ${timeout}`
+          : `pass a larger ${timeout}`,
       );
       if (result.stats.failing > 0) actions.push(failure);
       break;
+    }
     case "error":
       if (result.errorKind === "compile") {
         actions.push("fix the error in the spec or a file it imports, then run again");
+      } else if (cli) {
+        actions.push(
+          "cypress-mcp doctor if the output above does not explain it (launches Cypress, about 15 s)",
+        );
       } else {
         actions.push(
           `cypress_get_failure {"runId":"${runId}","view":"output"} for Cypress's output`,
