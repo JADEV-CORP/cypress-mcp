@@ -16,12 +16,24 @@ export const INLINE_OUTLINE_CHARS = 6_000;
 
 const MAX_VALUE_CHARS = 300;
 
+/**
+ * Anything a model could read as a fence marker: `<`, or its fullwidth and
+ * small forms, then up to 8 characters that are neither letters nor digits
+ * (spaces of any kind, zero-width characters, `/`, `\`) around "page" and
+ * "data", in any case. `</page  data>`, `< /PAGE data>`, `</page\u00a0data>`.
+ */
+const FENCE_MARKER = /[<\uff1c\ufe64][^\p{L}\p{N}>]{0,8}page[^\p{L}\p{N}>]{0,8}data/giu;
+
+/** App text that cannot open or close the fence; line breaks are kept. */
+export function neutralise(text: string): string {
+  return text.replace(FENCE_MARKER, "<_page data");
+}
+
 /** One line of app text, without control characters or the fence markers. */
 export function sanitize(value: string, max = MAX_VALUE_CHARS): string {
-  const flat = value
-    .replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ")
-    .replace(/<\/?page data/gi, "<_page data")
-    .trim();
+  const flat = neutralise(
+    value.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " "),
+  ).trim();
   return flat.length > max ? `${flat.slice(0, max)}...` : flat;
 }
 
@@ -103,12 +115,16 @@ export function pageDetail(page: PageContext, maxOutlineChars: number): string[]
   return lines;
 }
 
-/** The lines inside the untrusted fence, each with `indent`. */
+/**
+ * The lines inside the untrusted fence, each with `indent`. Every line is
+ * neutralised here, so text that was not sanitized (a multi-line error, a
+ * diff, Cypress output) cannot close the fence either.
+ */
 export function fence(lines: readonly string[], indent: string): string[] {
   if (lines.length === 0) return [];
   return [
     `${indent}${PAGE_OPEN}`,
-    ...lines.map((line) => `${indent}${line}`),
+    ...lines.map((line) => `${indent}${neutralise(line)}`),
     `${indent}${PAGE_CLOSE}`,
   ];
 }

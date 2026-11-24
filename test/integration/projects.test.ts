@@ -206,7 +206,9 @@ describe("failure context off", () => {
       grep: "logs in",
     });
     expect(run.data["contextCaptured"]).toBe(false);
-    expect(run.text).not.toContain("<page data");
+    // No page lines. The error is still fenced: Cypress quotes the page in it.
+    expect(run.text).not.toContain("   url: ");
+    expect(run.text).toContain("<page data");
 
     const repeat = await call(client, "cypress_run", {
       spec: "cypress/e2e/pass.cy.js",

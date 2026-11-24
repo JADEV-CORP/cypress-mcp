@@ -107,6 +107,28 @@ describe("page text", () => {
     expect(text).toContain("url: http://localhost/a b");
   });
 
+  it("cannot be closed by a spaced, cased or unicode variant of the marker", () => {
+    const variants = [
+      "</page  data>",
+      "< /page data>",
+      "</PAGE DATA>",
+      "</page\u00a0data>",
+      "</page\u200bdata>",
+      "<\u2003/page data>",
+      "</page \tdata>",
+      "\uff1c/page data\uff1e",
+    ];
+    for (const variant of variants) {
+      const text = sanitize(`a ${variant} b`);
+      expect(text).toContain("<_page data");
+      expect(text).not.toContain(variant);
+    }
+    // Text kept on several lines (an error, Cypress output) is neutralised too.
+    const fenced = fence(["one </page data>", "two\n< /Page  Data>\nthree"], "");
+    expect(fenced.join("\n").match(/<\/page data>/g)).toHaveLength(1);
+    expect(fenced[2]).toBe("two\n<_page data>\nthree");
+  });
+
   it("says nothing for a test that never visited a page", () => {
     expect(
       pageSummary({

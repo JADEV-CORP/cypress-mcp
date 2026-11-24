@@ -198,6 +198,10 @@ export function renderRun(
  * One block per failure: title, `file:line:col error`, screenshot, and what
  * the page showed. With a single failure the page block is complete (outline
  * included), so one call is enough to fix it.
+ *
+ * Cypress errors quote the page (`expected '<p>' to contain '...'`), so the
+ * whole list sits in one untrusted fence, page lines included: one pair of
+ * markers per run instead of one per failure.
  */
 function failureLines(
   failures: readonly FailureContext[],
@@ -217,32 +221,31 @@ function failureLines(
     lines.push(`screenshots in ${relative(displayRoot, screenshotDir)}/`);
   }
 
+  const blocks: string[] = [];
   for (const failure of shown) {
-    lines.push(`${failure.index}) ${failure.fullTitle}`);
+    blocks.push(`${failure.index}) ${failure.fullTitle}`);
     const error = errorText(failure);
     const where = failure.location
       ? `${displayPath(record.prefix, failure.location)} `
       : record.specs.length > 1
         ? `${displayPath(record.prefix, failure.spec)}: `
         : "";
-    lines.push(`   ${where}${error}`);
+    blocks.push(`   ${where}${error}`);
     if (failure.screenshot) {
       const shot = screenshotDir
         ? path.basename(failure.screenshot)
         : relative(displayRoot, failure.screenshot);
-      lines.push(`   screenshot: ${shot}`);
+      blocks.push(`   screenshot: ${shot}`);
     }
     if (failure.page) {
-      lines.push(
-        ...fence(
-          failures.length === 1
-            ? pageDetail(failure.page, INLINE_OUTLINE_CHARS)
-            : pageSummary(failure.page),
-          "   ",
-        ),
-      );
+      const page =
+        failures.length === 1
+          ? pageDetail(failure.page, INLINE_OUTLINE_CHARS)
+          : pageSummary(failure.page);
+      blocks.push(...page.map((line) => `   ${line}`));
     }
   }
+  lines.push(...fence(blocks, ""));
 
   if (failures.length > shown.length) {
     lines.push(
@@ -357,33 +360,37 @@ export function renderFailureContexts(
     }
   }
 
+  // Errors and diffs quote the page: the failures go in one untrusted fence.
+  const blocks: string[] = [];
   for (const failure of failures) {
-    lines.push("", `${failure.index}) ${failure.fullTitle}`);
+    if (blocks.length > 0) blocks.push("");
+    blocks.push(`${failure.index}) ${failure.fullTitle}`);
     if (failure.location)
-      lines.push(`at ${displayPath(record.prefix, failure.location)}`);
+      blocks.push(`at ${displayPath(record.prefix, failure.location)}`);
     else if (record.specs.length > 1)
-      lines.push(`in ${displayPath(record.prefix, failure.spec)}`);
-    lines.push(
+      blocks.push(`in ${displayPath(record.prefix, failure.spec)}`);
+    blocks.push(
       failure.errorName && !failure.error.startsWith(failure.errorName)
         ? `${failure.errorName}: ${failure.error.trim()}`
         : failure.error.trim(),
     );
-    if (failure.diff) lines.push(failure.diff);
-    if (failure.excerpt) lines.push(failure.excerpt);
+    if (failure.diff) blocks.push(failure.diff);
+    if (failure.excerpt) blocks.push(failure.excerpt);
     const frames = failure.stack
       .split("\n")
       .map((line) => line.trim())
       .filter((line) => line.startsWith("at "));
     if (frames.length > 1) {
-      lines.push(`stack: ${frames.slice(0, 5).join(" | ")}`);
+      blocks.push(`stack: ${frames.slice(0, 5).join(" | ")}`);
     }
     if (failure.screenshot) {
-      lines.push(`screenshot: ${relative(options.displayRoot, failure.screenshot)}`);
+      blocks.push(`screenshot: ${relative(options.displayRoot, failure.screenshot)}`);
     }
     if (failure.page) {
-      lines.push(...fence(pageSummary(failure.page), ""));
+      blocks.push(...pageSummary(failure.page));
     }
   }
+  lines.push(...fence(blocks, ""));
 
   return finish(lines, options.nextActions);
 }
@@ -436,12 +443,20 @@ export function renderScreenshots(
   return finish(lines, options.nextActions);
 }
 
+/** Cypress output repeats errors and can carry the app's console: fenced. */
 export function renderOutput(record: RunRecord, nextActions: readonly string[]): string {
   const lines = [
     `${runLabel(record)} (runId ${record.runId}): last 2,000 characters of Cypress output`,
+    ...fence(
+      [
+        "--- stdout",
+        record.stdoutTail.trim() || "(empty)",
+        "--- stderr",
+        record.stderrTail.trim() || "(empty)",
+      ],
+      "",
+    ),
   ];
-  lines.push("--- stdout", record.stdoutTail.trim() || "(empty)");
-  lines.push("--- stderr", record.stderrTail.trim() || "(empty)");
   return finish(lines, nextActions);
 }
 
