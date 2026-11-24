@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.4.1 (unreleased)
+
+Fixes from a review of 0.4.0 run against real Cypress, and a CLI that people can use as well as agents.
+
+### Fixes
+
+- A run of several specs where Cypress exits non-zero with no failure (a crash partway) is now an error that names the specs without a report, instead of a pass.
+- A run where Cypress exits normally while a helper process keeps its output open ends 2 seconds after the exit with its reports, instead of waiting for `timeout` and being recorded as a timeout that blocks the queue.
+- `testName` or `path:line` on a skipped test (`it.skip`, `this.skip()`) returns status `skipped` instead of `no_match`.
+- The config reader takes `specPattern`, `supportFile` and folder options from the `e2e` object, never from `component`, and keeps globs such as `*.cy.[jt]s` whole, so `cypress_list_specs` lists the right specs.
+- Titles built at runtime (`it("adds " + n)`, `` it(`item ${n}`) ``, `describe(name)`) show as `${...}` and still count. A `path:line` on such a test runs the whole spec and says so, instead of matching nothing.
+- A `cypress-mcp.config.json` that is not valid JSON is logged and shown as a `warn` line in `cypress_doctor` instead of being ignored silently.
+- `cypress_doctor` with `quick` checks that the Cypress binary for the installed version is in the cache (or at `CYPRESS_RUN_BINARY`). It said Healthy when only the npm package was there. The package check is now named `Cypress package`.
+- A run that fails because the Cypress binary is not installed suggests `npx cypress install` instead of `cypress_doctor`.
+- `cypress_get_failure` with `view: "screenshots"` or `image: true` shows the last attempt of each retried test. `attempts: true` adds the earlier ones.
+- Stopping the server sends SIGKILL to a Cypress that ignores SIGTERM for 5 seconds.
+
+### Security
+
+- The server no longer searches the disk root, the home folder or a folder above it for Cypress projects. Claude Desktop starts servers in `/`: from there, 0.4.0 scanned the disk for 9 seconds and offered Cypress projects of unrelated repositories. Tools now return `CONFIG_NOT_FOUND` naming the server root and asking for `--cwd <project folder>`.
+- The search for projects in subfolders stops after 20,000 folders or 5 seconds and says so. `CONFIG_NOT_FOUND` always names the server root, and a `--cwd` that does not exist gets its own message.
+- The browser runtime masks secrets before they leave the page, as `***`: query and fragment values in URLs whose key looks secret or whose value looks like a token, form fields named like a token, key or one-time code, JWTs, `Bearer` credentials and token-like strings in console text and the command log.
+- Assertion errors, diffs and Cypress output are fenced as untrusted like the page, with one fence around a run's failure list, and the fence close marker can no longer be faked with spacing, case or unicode variants.
+- `cypress_run` rejects unknown arguments, so a typo such as `specFile` does not run the whole suite.
+
+### Agents
+
+- `cypress_run` without `spec` runs every spec of the project in one launch. In a monorepo root with several projects it asks for `project`.
+- Docs: some MCP clients start servers with only a few environment variables; set `CYPRESS_CACHE_FOLDER`, proxy settings or `CYPRESS_RECORD_KEY` in the client's `env` for this server.
+
+### CLI
+
+- `cypress-mcp doctor` and `cypress-mcp list` print the same text as `cypress_doctor` and `cypress_list_specs`. `cypress-mcp run` without a spec runs every spec.
+- An unknown command prints the usage and exits 2. Run in a terminal without a command, cypress-mcp says it is an MCP server and how to add it to a client, instead of waiting on stdin.
+- CLI output names CLI options instead of MCP tools, prints absolute screenshot paths, and `--json` adds each failure's source excerpt and stack.
+
+### Build and CI
+
+- `scripts/audit-prod.mjs` fails when `npm audit` could not complete, instead of passing.
+- Built with tsup 9 and esbuild 0.28.2 (clears GHSA-g7r4-m6w7-qqqr, a low advisory in the build tool only). Building needs Node.js 22.18 or later; the package still runs on 22.12.
+- Removed the picomatch advisory GHSA-fc5q-39xc-vjpf from `audit-allowlist.json`: GitHub withdrew it on 2026-11-18.
+- The release waits until npm serves the new version before listing it in the MCP Registry. For 0.4.0 the registry step ran while npm was still processing the package.
+
 ## 0.4.0 (2026-11-24)
 
 Everything needed to fix a failing test in one call: the page at the failure, without touching the project. The default tool set stays at four; the new capabilities are run arguments and `cypress_get_failure` views.
