@@ -14,7 +14,8 @@ import type { Logger } from "../utils/logger.js";
 
 const MAX_GLOB_LENGTH = 1024;
 // +(..) @(..) !(..) *(..) ?(..): the extglob forms behind picomatch ReDoS
-// advisories such as GHSA-fc5q-39xc-vjpf. Spec patterns never need them.
+// reports such as GHSA-fc5q-39xc-vjpf (withdrawn on 2026-11-18). Spec
+// patterns never need them.
 const EXTGLOB_GROUP = /[+@!*?]\(/;
 
 /**
