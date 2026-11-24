@@ -5,9 +5,20 @@
 // cypress_analyze_spec, cypress_list_specs and cypress_run_test. Regexes over
 // the raw text kept finding tests inside strings and calls such as
 // cy.visit("..."), so this scans the source once and skips strings, comments
-// and regex literals. It is not a JavaScript parser: titles built at runtime
-// (variables, string concatenation) are not seen, which is the same limit any
-// static count has.
+// and regex literals. It is not a JavaScript parser: a title built at runtime
+// (a variable, a concatenation, a template with ${...}) cannot be known. Such a
+// test or suite is still counted, marked dynamic, and shows its code as
+// ${...}, so its children keep their suite prefix and nobody filters on a
+// wrong literal.
+
+import {
+  readLiteral,
+  scanTo,
+  skipBlank,
+  skipQuoted,
+  skipRegex,
+  startsRegex,
+} from "../utils/js-scan.js";
 
 export type BlockMode = "only" | "skip";
 
@@ -18,12 +29,19 @@ export interface ParsedTest {
   /** 1-based line of the it() call */
   readonly line: number;
   readonly mode?: BlockMode;
+  /**
+   * Part of the full title is built at runtime, in this title or a suite
+   * above. That part shows as `${...}`, so no exact title matches it.
+   */
+  readonly dynamic?: boolean;
 }
 
 export interface ParsedSuite {
   readonly name: string;
   readonly line: number;
   readonly mode?: BlockMode;
+  /** The title, or a suite title above it, is built at runtime */
+  readonly dynamic?: boolean;
   readonly tests: ParsedTest[];
   readonly hooks: string[];
   readonly suites: ParsedSuite[];
@@ -54,9 +72,8 @@ const TEST_CALLS = new Map<string, BlockMode | undefined>([
 
 const HOOK_CALLS = new Set(["before", "beforeEach", "after", "afterEach"]);
 
-// After one of these characters a "/" starts a regex literal, not a division.
-const REGEX_PRECEDERS = new Set("(,=:[!&|?{};+-*%<>~^");
-const REGEX_KEYWORDS = new Set(["return", "typeof", "case", "do", "else", "in", "of"]);
+/** Longest code shown for a title built at runtime, so a big expression stays short. */
+const MAX_TITLE_CODE = 80;
 
 interface OpenSuite {
   readonly suite: ParsedSuite;
@@ -92,11 +109,14 @@ export function parseSpec(source: string): ParsedSpec {
       const line = scanner.lineAt(start);
       const mode = modeOf(call.modifier) ?? SUITE_CALLS.get(name) ?? TEST_CALLS.get(name);
 
+      const dynamic = call.dynamic === true || current().dynamic === true;
+
       if (SUITE_CALLS.has(name) && call.title !== undefined) {
         const suite: ParsedSuite = {
           name: call.title,
           line,
           ...(mode ? { mode } : {}),
+          ...(dynamic ? { dynamic } : {}),
           tests: [],
           hooks: [],
           suites: [],
@@ -115,6 +135,7 @@ export function parseSpec(source: string): ParsedSpec {
           fullTitle: [...titlePath(), call.title].join(" "),
           line,
           ...(mode ? { mode } : {}),
+          ...(dynamic ? { dynamic } : {}),
         };
         current().tests.push(test);
         tests.push(test);
@@ -136,14 +157,16 @@ function modeOf(modifier: string | undefined): BlockMode | undefined {
 
 interface CallInfo {
   readonly modifier?: string;
-  /** Static title, when the first argument is a string or template literal */
+  /** The title as written; code shown as `${...}` when it is built at runtime */
   readonly title?: string;
+  /** The title is built at runtime */
+  readonly dynamic?: boolean;
 }
 
 /**
  * Look ahead from the end of an identifier for `.only` / `.skip` and an
- * opening paren, then read the first argument when it is a literal.
- * Returns undefined when the identifier is not called.
+ * opening paren, then read the first argument. Returns undefined when the
+ * identifier is not called.
  */
 function readCall(source: string, from: number): CallInfo | undefined {
   let index = skipBlank(source, from);
@@ -162,84 +185,34 @@ function readCall(source: string, from: number): CallInfo | undefined {
     return undefined;
   }
 
-  index = skipBlank(source, index + 1);
-  const quote = source[index];
-  if (quote !== '"' && quote !== "'" && quote !== "`") {
+  const start = skipBlank(source, index + 1);
+  const literal = readLiteral(source, start);
+  // A literal is the title only when it is the whole first argument:
+  // it("a" + n) starts with one but is built at runtime.
+  const after = literal ? source[skipBlank(source, literal.end)] : undefined;
+  if (literal && (after === "," || after === ")")) {
+    return {
+      modifier,
+      title: literal.text,
+      ...(literal.dynamic ? { dynamic: true } : {}),
+    };
+  }
+
+  // Any other first argument is built at runtime. Only a call with a callback
+  // after it counts, so context(value) is not taken for a suite.
+  const end = scanTo(source, start, ",)");
+  if (end <= start || source[end] !== ",") {
     return { modifier };
   }
-
-  const literal = readLiteral(source, index);
-  return { modifier, title: literal };
+  return { modifier, title: runtimeTitle(source.slice(start, end)), dynamic: true };
 }
 
-/** Skip whitespace and comments. */
-function skipBlank(source: string, from: number): number {
-  let index = from;
-  while (index < source.length) {
-    const char = source[index]!;
-    if (/\s/.test(char)) {
-      index++;
-    } else if (source.startsWith("//", index)) {
-      const end = source.indexOf("\n", index);
-      index = end === -1 ? source.length : end + 1;
-    } else if (source.startsWith("/*", index)) {
-      const end = source.indexOf("*/", index + 2);
-      index = end === -1 ? source.length : end + 2;
-    } else {
-      break;
-    }
-  }
-  return index;
-}
-
-const ESCAPES: Readonly<Record<string, string>> = { n: "\n", t: "\t", r: "\r" };
-
-/**
- * Read the string or template literal that starts at `start` and return its
- * text. Template placeholders are kept as written (`${n}`), which is what an
- * agent needs to recognize a generated title.
- */
-function readLiteral(source: string, start: number): string | undefined {
-  const quote = source[start];
-  let text = "";
-  let index = start + 1;
-  let braces = 0;
-
-  while (index < source.length) {
-    const char = source[index]!;
-
-    if (char === "\\") {
-      const next = source[index + 1] ?? "";
-      text += quote === "`" ? char + next : (ESCAPES[next] ?? next);
-      index += 2;
-      continue;
-    }
-
-    if (quote === "`") {
-      if (braces === 0 && char === "`") {
-        return text;
-      }
-      if (char === "$" && source[index + 1] === "{") {
-        braces++;
-        text += "${";
-        index += 2;
-        continue;
-      }
-      if (braces > 0 && char === "}") {
-        braces--;
-      }
-    } else if (char === quote) {
-      return text;
-    } else if (char === "\n") {
-      // Quoted strings cannot span lines: this was not a string after all.
-      return undefined;
-    }
-
-    text += char;
-    index++;
-  }
-
-  return undefined;
+/** The code of a title built at runtime, on one line, as `${code}`. */
+function runtimeTitle(code: string): string {
+  const flat = code.replace(/\s+/g, " ").trim();
+  const shown =
+    flat.length > MAX_TITLE_CODE ? `${flat.slice(0, MAX_TITLE_CODE - 3)}...` : flat;
+  return "${" + shown + "}";
 }
 
 interface ScanHandlers {
@@ -392,53 +365,4 @@ class Scanner {
     }
     return index;
   }
-}
-
-function startsRegex(previous: string): boolean {
-  return previous === "" || REGEX_PRECEDERS.has(previous) || REGEX_KEYWORDS.has(previous);
-}
-
-function skipQuoted(source: string, start: number): number {
-  const quote = source[start];
-  let index = start + 1;
-  while (index < source.length) {
-    const char = source[index]!;
-    if (char === "\\") {
-      index += 2;
-      continue;
-    }
-    if (char === quote || char === "\n") {
-      return index + 1;
-    }
-    index++;
-  }
-  return index;
-}
-
-function skipRegex(source: string, start: number): number {
-  let index = start + 1;
-  let inClass = false;
-  while (index < source.length) {
-    const char = source[index]!;
-    if (char === "\\") {
-      index += 2;
-      continue;
-    }
-    if (char === "\n") {
-      return index;
-    }
-    if (inClass) {
-      if (char === "]") inClass = false;
-    } else if (char === "[") {
-      inClass = true;
-    } else if (char === "/") {
-      index++;
-      while (index < source.length && /[a-z]/i.test(source[index]!)) {
-        index++;
-      }
-      return index;
-    }
-    index++;
-  }
-  return index;
 }

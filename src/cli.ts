@@ -161,6 +161,7 @@ export async function runCli(
       specs: run.specs,
       prefix: run.prefix,
       args: run.args,
+      notes: run.notes,
       signal: controller.signal,
     });
     const result = await runResult(ctx, outcome, values.verbose === true);

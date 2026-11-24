@@ -35,6 +35,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
           specs: run.specs,
           prefix: run.prefix,
           args: run.args,
+          notes: run.notes,
           testName: input.testName,
           request,
         });

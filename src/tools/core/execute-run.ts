@@ -27,6 +27,7 @@ interface LegacyRunOptions {
   readonly specs: readonly string[];
   readonly prefix?: string;
   readonly args: CypressRunArgs;
+  readonly notes?: readonly string[];
   readonly testName?: string;
   readonly previousRunId?: string;
   readonly request?: ServerContext;
@@ -45,6 +46,7 @@ export async function executeLegacyRun(
     specs: options.specs,
     args,
     prefix: options.prefix,
+    notes: options.notes,
     signal: options.request?.mcpReq.signal,
     onProgress: progress.onProgress,
   });

@@ -894,6 +894,35 @@ describe("targets: several specs, globs, file:line, repeat, component (0.4)", ()
     expect(mixed.structured.data["code"]).toBe("INVALID_ARGUMENT");
   });
 
+  it("runs the whole spec, and says so, when the title at a file:line is built at runtime", async () => {
+    const spec = path.join(root, "cypress", "e2e", "sizes.cy.js");
+    fs.writeFileSync(
+      spec,
+      ["describe(`Cart ${size}`, () => {", '  it("adds", () => {});', "});", ""].join(
+        "\n",
+      ),
+    );
+
+    try {
+      const { text, structured } = await call("cypress_run", {
+        spec: "cypress/e2e/sizes.cy.js:2",
+      });
+      expect(structured.data["status"]).toBe("passed");
+      expect(structured.data["titles"]).toBeUndefined();
+      expect(text).toContain(
+        'note: cypress/e2e/sizes.cy.js:2: the title "Cart ${size} adds" is built at runtime, so no exact title can select it; ran the whole spec instead.',
+      );
+
+      const withName = await call("cypress_run", {
+        spec: "cypress/e2e/sizes.cy.js:2",
+        testName: "adds",
+      });
+      expect(withName.structured.data["code"]).toBe("INVALID_ARGUMENT");
+    } finally {
+      fs.rmSync(spec, { force: true });
+    }
+  });
+
   it("repeats the selected tests to prove a fix", async () => {
     const { text, structured } = await call("cypress_run", {
       spec: "cypress/e2e/pass.cy.js",

@@ -56,8 +56,44 @@ describe("parseSpec", () => {
     ]);
   });
 
-  it("keeps template literal titles as written", () => {
-    expect(names("it(`renders row ${n}`, () => {});")).toEqual(["renders row ${n}"]);
+  it("keeps template literal titles as written, dynamic only with a placeholder", () => {
+    const spec = parseSpec("it(`renders row ${n}`, () => {}); it(`plain`, () => {});");
+
+    expect(spec.tests.map((t) => [t.name, t.dynamic])).toEqual([
+      ["renders row ${n}", true],
+      ["plain", undefined],
+    ]);
+  });
+
+  it("marks a concatenated title as dynamic instead of keeping its first string", () => {
+    const spec = parseSpec('it("works with " + N, () => {}); it("todo");');
+
+    expect(spec.tests.map((t) => [t.name, t.dynamic])).toEqual([
+      ['${"works with " + N}', true],
+      ["todo", undefined],
+    ]);
+  });
+
+  it("keeps a describe with a runtime title as a suite, so its tests keep a prefix", () => {
+    const spec = parseSpec(
+      [
+        "describe(N, () => {",
+        '  describe("Cart", () => {',
+        '    it("adds", () => {});',
+        "  });",
+        "});",
+        'it("after", () => {});',
+      ].join("\n"),
+    );
+
+    expect(spec.suites.map((s) => [s.name, s.dynamic])).toEqual([
+      ["${N}", true],
+      ["Cart", true],
+    ]);
+    expect(spec.tests.map((t) => [t.fullTitle, t.dynamic])).toEqual([
+      ["${N} Cart adds", true],
+      ["after", undefined],
+    ]);
   });
 
   it("handles quotes of the other kind inside titles", () => {
@@ -103,7 +139,9 @@ describe("parseSpec", () => {
     expect(spec.tests.map((t) => t.fullTitle)).toEqual(["A x", "B y"]);
   });
 
-  it("does not count tests whose title is built at runtime", () => {
-    expect(names("it(title, () => {}); it('static', () => {});")).toEqual(["static"]);
+  it("counts tests whose title is a variable, but not calls without a callback", () => {
+    expect(names("context(value); it(title, () => {}); it('static', () => {});")).toEqual(
+      ["${title}", "static"],
+    );
   });
 });

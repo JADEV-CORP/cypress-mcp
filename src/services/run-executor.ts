@@ -34,6 +34,8 @@ export interface RunRequest {
   /** Aborts the run: a queued run never starts, a running Cypress is killed */
   readonly signal?: AbortSignal;
   readonly onProgress?: (progress: RunProgress) => void;
+  /** Shown with the result before Cypress's own warnings, from prepareRun */
+  readonly notes?: readonly string[];
 }
 
 /**
@@ -69,7 +71,7 @@ export async function executeCypressRun(
 ): Promise<RunOutcome> {
   const config = await ctx.configLoader.load();
   const runId = ctx.stateStore.allocateRunId();
-  const warnings: string[] = [];
+  const warnings: string[] = [...(request.notes ?? [])];
   const wrap = config.failureContext && ctx.wrapperDisabled === undefined;
 
   await cleanupWorkspaces(ctx.projectRoot, ctx.logger);

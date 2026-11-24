@@ -7,6 +7,7 @@ import type { CloudRecordArgs, CypressRunArgs } from "../types/cypress.js";
 import type { RunProgress } from "../services/reporter-events.js";
 import { InvalidArgumentError } from "../utils/errors.js";
 import { resolveTargets } from "../services/targets.js";
+import { displayPath } from "../services/projects.js";
 
 // Descriptions and constraints are kept short: every tool definition is sent
 // to the model, and this shape is in each run tool. Limits that only guard
@@ -118,6 +119,8 @@ export interface PreparedRun {
   /** Spec files, project relative */
   readonly specs: readonly string[];
   readonly args: CypressRunArgs;
+  /** Notes for the run result, such as a file:line that ran its whole spec */
+  readonly notes?: readonly string[];
 }
 
 export const MAX_REPEAT = 50;
@@ -159,8 +162,10 @@ export async function prepareRun(
     project: input.project,
     specs: inputs,
   });
-  const targets = await resolveTargets(ctx, projectSpecs);
-  if (targets.titles && input.testName !== undefined) {
+  const targets = await resolveTargets(ctx, projectSpecs, (spec) =>
+    displayPath(prefix, spec),
+  );
+  if (targets.byLine && input.testName !== undefined) {
     throw new InvalidArgumentError(
       "Use either testName or a file:line target, not both: file:line already picks the test.",
     );
@@ -187,6 +192,7 @@ export async function prepareRun(
       configFile: config.cypressConfigFile,
       cloud: toCloudArgs(input),
     },
+    ...(targets.notes ? { notes: targets.notes } : {}),
   };
 }
 

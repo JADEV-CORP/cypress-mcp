@@ -7,7 +7,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import type { ToolContext } from "../types/index.js";
-import type { ParsedSpec, ParsedSuite } from "./spec-parser.js";
+import type { ParsedSpec, ParsedSuite, ParsedTest } from "./spec-parser.js";
 import { assertPlainGlob } from "./spec-finder.js";
 import { InvalidArgumentError, SpecNotFoundError } from "../utils/errors.js";
 
@@ -18,6 +18,10 @@ export interface RunTargets {
   readonly cypressSpec: string;
   /** Exact full titles, when the targets were file:line */
   readonly titles?: readonly string[];
+  /** The targets were file:line, even when they fell back to whole specs */
+  readonly byLine?: boolean;
+  /** For the run result, such as a file:line that ran its whole spec instead */
+  readonly notes?: readonly string[];
 }
 
 const GLOB_CHARS = /[*?[\]{}]/;
@@ -26,9 +30,14 @@ const FILE_LINE = /^(.+?):(\d+)(?::\d+)?$/;
 /** Upper bound for one launch; a bigger suite should go through a glob in CI. */
 const MAX_SPECS = 500;
 
+/**
+ * `display` turns a project relative spec path into the one the agent sees
+ * (server root relative in a monorepo), for the notes.
+ */
 export async function resolveTargets(
   ctx: ToolContext,
   inputs: readonly string[],
+  display: (spec: string) => string = (spec) => spec,
 ): Promise<RunTargets> {
   if (inputs.length === 0) {
     throw new InvalidArgumentError(
@@ -38,8 +47,13 @@ export async function resolveTargets(
 
   const specs: string[] = [];
   const titles: string[] = [];
+  const notes: string[] = [];
   let globs = 0;
   let lineTargets = 0;
+  // file:line targets whose title is built at runtime. No exact title
+  // matches them, and the title filter applies to every spec of the run, so
+  // one of them is enough to run whole specs.
+  let dynamicTargets = 0;
 
   for (const raw of inputs) {
     const input = raw.trim();
@@ -49,14 +63,21 @@ export async function resolveTargets(
       const spec = await ctx.specFinder.resolveSpec(lineMatch[1]!);
       const line = Number(lineMatch[2]);
       const parsed = await ctx.specFinder.parse(spec);
-      const found = parsed ? titlesAtLine(parsed, line) : [];
+      const found = parsed ? testsAtLine(parsed, line) : [];
       if (found.length === 0) {
         throw new InvalidArgumentError(
           `No test or describe block starts at or before line ${line} of ${spec}. Pass the line of an it() or describe() call, or the spec alone.`,
         );
       }
       specs.push(spec);
-      titles.push(...found);
+      titles.push(...found.map((test) => test.fullTitle));
+      const dynamic = found.find((test) => test.dynamic);
+      if (dynamic) {
+        dynamicTargets++;
+        notes.push(
+          `${display(spec)}:${line}: the title "${dynamic.fullTitle}" is built at runtime, so no exact title can select it; ran the whole spec instead.`,
+        );
+      }
       lineTargets++;
     } else if (
       GLOB_CHARS.test(input) &&
@@ -98,13 +119,21 @@ export async function resolveTargets(
     );
   }
 
+  if (dynamicTargets > 0 && lineTargets > dynamicTargets) {
+    notes.push("The other file:line targets of this run ran their whole spec too.");
+  }
+
   return {
     specs: unique,
     // A single glob goes to Cypress as written, which keeps the command line
     // short for big suites; Cypress expands it relative to the project root.
     cypressSpec:
       globs === 1 && inputs.length === 1 ? inputs[0]!.trim() : unique.join(","),
-    ...(titles.length > 0 ? { titles: [...new Set(titles)] } : {}),
+    ...(titles.length > 0 && dynamicTargets === 0
+      ? { titles: [...new Set(titles)] }
+      : {}),
+    ...(lineTargets > 0 ? { byLine: true } : {}),
+    ...(notes.length > 0 ? { notes } : {}),
   };
 }
 
@@ -114,18 +143,23 @@ export async function resolveTargets(
  * tests.
  */
 export function titlesAtLine(parsed: ParsedSpec, line: number): string[] {
-  type Block = { line: number; titles: () => string[] };
+  return testsAtLine(parsed, line).map((test) => test.fullTitle);
+}
+
+/** The tests behind titlesAtLine, with whether their title is built at runtime. */
+function testsAtLine(parsed: ParsedSpec, line: number): ParsedTest[] {
+  type Block = { line: number; tests: () => ParsedTest[] };
   const blocks: Block[] = [
-    ...parsed.tests.map((test) => ({ line: test.line, titles: () => [test.fullTitle] })),
-    ...parsed.suites.map((suite) => ({ line: suite.line, titles: () => testsIn(suite) })),
+    ...parsed.tests.map((test) => ({ line: test.line, tests: () => [test] })),
+    ...parsed.suites.map((suite) => ({ line: suite.line, tests: () => testsIn(suite) })),
   ];
   // The latest start at or before the line; on a tie (same line), the test.
   const best = blocks
     .filter((block) => block.line > 0 && block.line <= line)
     .sort((a, b) => b.line - a.line)[0];
-  return best ? best.titles() : [];
+  return best ? best.tests() : [];
 }
 
-function testsIn(suite: ParsedSuite): string[] {
-  return [...suite.tests.map((test) => test.fullTitle), ...suite.suites.flatMap(testsIn)];
+function testsIn(suite: ParsedSuite): ParsedTest[] {
+  return [...suite.tests, ...suite.suites.flatMap(testsIn)];
 }
