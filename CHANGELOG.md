@@ -1,11 +1,22 @@
 # Changelog
 
-## Unreleased
+## 0.5.1 (2026-11-24)
+
+New home on GitHub, the last unfenced Cypress text fenced, and a repo that is easier to contribute to.
+
+### Security
+
+- When a run crashes or a spec does not compile, the text Cypress printed (its output, the compile error quoting the spec's code) now sits inside the untrusted `<page data>` fence, like failures and page context. The status line cypress-mcp writes stays outside. Timeouts, which cypress-mcp words itself, are not fenced.
 
 ### Changed
 
 - The repository moved to [JADEV-CORP/cypress-mcp](https://github.com/JADEV-CORP/cypress-mcp). Old `jams4code/cypress-mcp` links and clones keep working through GitHub's redirect.
 - The server is listed in the MCP Registry as `com.jadev-corp/cypress-mcp`. The old entry `io.github.jams4code/cypress-mcp` stays at 0.5.0 and gets no new versions. The npm package name does not change.
+
+### Contributing
+
+- CONTRIBUTING.md covers a first PR end to end: setup, one test file, trying a build in a real MCP client or the MCP Inspector, the rules that keep agents safe, and adding a client to `init`.
+- New: a code of conduct (Contributor Covenant 2.1), `AGENTS.md` for coding agents working in the repo, `.nvmrc` and `.editorconfig`.
 
 ## 0.5.0 (2026-11-24)
 

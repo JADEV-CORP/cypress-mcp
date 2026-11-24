@@ -1,6 +1,6 @@
 {
   "name": "cypress-mcp",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "MCP server and CLI that let AI coding agents run and debug Cypress tests: compact failures with file:line, error and screenshot, flaky test detection, Cypress Cloud recording.",
   "mcpName": "com.jadev-corp/cypress-mcp",
   "type": "module",
