@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Release
+
+- The MCP Registry job passes the DNS signing key with `--private-key`, the only place mcp-publisher reads it. 0.5.1 reached npm but not the registry because of this.
+
 ## 0.5.1 (2026-11-24)
 
 New home on GitHub, the last unfenced Cypress text fenced, and a repo that is easier to contribute to.

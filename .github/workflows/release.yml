@@ -165,11 +165,14 @@ jobs:
           tar xzf "$archive" mcp-publisher
           rm -f "$archive" "$archive.sigstore.json"
 
-      # The key reaches mcp-publisher through the environment, never the command line.
+      # mcp-publisher reads the key only from --private-key; it ignores the
+      # environment (v0.5.1 failed with "private key (hex) is required"). The
+      # secret goes in through env so it is not expanded into this script, and
+      # Actions masks it in the log.
       - name: Publish to the MCP Registry
         if: steps.registry.outputs.published != 'true'
         env:
           MCP_PRIVATE_KEY: ${{ secrets.MCP_PRIVATE_KEY }}
         run: |
-          ./mcp-publisher login dns --domain jadev-corp.com
+          ./mcp-publisher login dns --domain jadev-corp.com --private-key "$MCP_PRIVATE_KEY"
           ./mcp-publisher publish
