@@ -12,6 +12,7 @@ import {
 import { ConfigNotFoundError } from "../utils/errors.js";
 import { normalizePath } from "../utils/paths.js";
 import type { Logger } from "../utils/logger.js";
+import { maskCode, readLiteral, skipBlank } from "../utils/js-scan.js";
 
 /** Size and modification time of each file a config was built from. */
 type Fingerprint = Map<string, string>;
@@ -305,51 +306,140 @@ function nonEmpty(value: string | undefined): string | undefined {
   return value && value.trim() !== "" ? value.trim() : undefined;
 }
 
+/**
+ * Hints for e2e runs, read from the config text. Cypress accepts specPattern
+ * and supportFile only inside the `e2e` and `component` objects, and lets
+ * either override a global option such as screenshotsFolder. So each key is
+ * read inside `e2e: {...}` first, then outside both objects; a value inside
+ * `component: {...}` is never used. Component runs take their specs from the
+ * spec argument and need none of these. A value that is not a plain literal
+ * (a variable, a spread, a concatenation) counts as missing, so the next
+ * place, then the default, applies.
+ */
 function extractConfigHints(content: string): ConfigHints {
+  const scope = new E2eScope(content);
   return {
-    projectId: extractSingleString(content, "projectId"),
-    specPattern: extractStringList(content, "specPattern"),
-    supportFile: extractSupportFile(content),
+    projectId: scope.read("projectId", readString),
+    specPattern: scope.read("specPattern", readStringList),
+    supportFile: scope.read("supportFile", readSupportFile),
     screenshotsDir:
-      extractSingleString(content, "screenshotsFolder") ??
-      extractSingleString(content, "screenshotsDir"),
+      scope.read("screenshotsFolder", readString) ??
+      scope.read("screenshotsDir", readString),
     downloadsDir:
-      extractSingleString(content, "downloadsFolder") ??
-      extractSingleString(content, "downloadsDir"),
+      scope.read("downloadsFolder", readString) ?? scope.read("downloadsDir", readString),
   };
 }
 
-function extractStringList(content: string, key: string): readonly string[] | undefined {
-  const arrayPattern = new RegExp(`${key}\\s*:\\s*\\[(.*?)\\]`, "s");
-  const arrayMatch = arrayPattern.exec(content);
-  if (arrayMatch?.[1]) {
-    const values = Array.from(
-      arrayMatch[1].matchAll(/["'`]([^"'`]+)["'`]/g),
-      (match) => match[1],
-    ).filter((value): value is string => typeof value === "string");
+/** Start and end offsets of an object literal, braces included. */
+type Range = readonly [start: number, end: number];
 
-    if (values.length > 0) {
-      return values;
+/** Reads a value at the offset just after `key:`, undefined when it is not a literal. */
+type ValueReader<T> = (content: string, at: number) => T | undefined;
+
+class E2eScope {
+  /** The content with strings and comments blanked: keys and braces in code only */
+  private readonly mask: string;
+  private readonly e2e: readonly Range[];
+  private readonly component: readonly Range[];
+
+  constructor(private readonly content: string) {
+    this.mask = maskCode(content);
+    this.e2e = objectRanges(this.mask, "e2e");
+    this.component = objectRanges(this.mask, "component");
+  }
+
+  /** The first readable value of `key`: inside e2e, then outside both testing types. */
+  read<T>(key: string, reader: ValueReader<T>): T | undefined {
+    const inE2e: number[] = [];
+    const outside: number[] = [];
+    // Not after "." either: `cond ? config.specPattern : x` is no key.
+    for (const match of this.mask.matchAll(
+      new RegExp(`(?<![\\w$.])${key}\\s*:\\s*`, "g"),
+    )) {
+      const at = match.index + match[0].length;
+      if (within(this.e2e, at)) {
+        inE2e.push(at);
+      } else if (!within(this.component, at)) {
+        outside.push(at);
+      }
+    }
+    for (const at of [...inE2e, ...outside]) {
+      const value = reader(this.content, at);
+      if (value !== undefined) {
+        return value;
+      }
+    }
+    return undefined;
+  }
+}
+
+/** Every `name: {...}` object in the mask. */
+function objectRanges(mask: string, name: string): Range[] {
+  const ranges: Range[] = [];
+  for (const match of mask.matchAll(new RegExp(`(?<![\\w$.])${name}\\s*:\\s*\\{`, "g"))) {
+    const open = match.index + match[0].length - 1;
+    let depth = 0;
+    let close = mask.length;
+    for (let i = open; i < mask.length; i++) {
+      if (mask[i] === "{") {
+        depth++;
+      } else if (mask[i] === "}" && --depth === 0) {
+        close = i;
+        break;
+      }
+    }
+    ranges.push([open, close]);
+  }
+  return ranges;
+}
+
+function within(ranges: readonly Range[], at: number): boolean {
+  return ranges.some(([start, end]) => at > start && at < end);
+}
+
+/** Whether the value read so far is the whole value: the next token ends it. */
+function endsValue(content: string, index: number): boolean {
+  const next = content[skipBlank(content, index)];
+  return next === undefined || next === "," || next === "}";
+}
+
+function readString(content: string, at: number): string | undefined {
+  const literal = readLiteral(content, at);
+  return literal && !literal.dynamic && endsValue(content, literal.end)
+    ? literal.text
+    : undefined;
+}
+
+/** A string, or an array of strings read literal by literal, so "[jt]" in a glob does not end it. */
+function readStringList(content: string, at: number): readonly string[] | undefined {
+  if (content[at] !== "[") {
+    const single = readString(content, at);
+    return single === undefined ? undefined : [single];
+  }
+
+  const values: string[] = [];
+  let index = skipBlank(content, at + 1);
+  while (content[index] !== "]") {
+    const literal = readLiteral(content, index);
+    if (!literal || literal.dynamic) {
+      return undefined;
+    }
+    values.push(literal.text);
+    index = skipBlank(content, literal.end);
+    if (content[index] === ",") {
+      index = skipBlank(content, index + 1);
+    } else if (content[index] !== "]") {
+      return undefined;
     }
   }
-
-  const singleValue = extractSingleString(content, key);
-  return singleValue ? [singleValue] : undefined;
+  return values.length > 0 && endsValue(content, index + 1) ? values : undefined;
 }
 
-function extractSupportFile(content: string): string | false | undefined {
-  const disabledPattern = /supportFile\s*:\s*false/;
-  if (disabledPattern.test(content)) {
+function readSupportFile(content: string, at: number): string | false | undefined {
+  if (content.startsWith("false", at) && endsValue(content, at + "false".length)) {
     return false;
   }
-
-  return extractSingleString(content, "supportFile");
-}
-
-function extractSingleString(content: string, key: string): string | undefined {
-  const pattern = new RegExp(`${key}\\s*:\\s*["'\`]([^"'\`]+)["'\`]`);
-  const match = pattern.exec(content);
-  return match?.[1];
+  return readString(content, at);
 }
 
 function resolveRelativeImports(absolutePath: string, content: string): string[] {

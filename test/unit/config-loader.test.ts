@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { ConfigLoader } from "../../src/services/config-loader.js";
 import { createLogger } from "../../src/utils/logger.js";
+import type { CypressMcpConfig } from "../../src/types/config.js";
 
 const fixtureRoot = path.resolve("test/fixtures/cypress-project");
 const logger = createLogger(false);
@@ -78,6 +79,98 @@ describe("ConfigLoader", () => {
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
+  });
+
+  describe("reads e2e options, not the component ones", () => {
+    async function load(config: string): Promise<CypressMcpConfig> {
+      const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cypress-mcp-config-"));
+      try {
+        await fs.writeFile(path.join(tempRoot, "cypress.config.ts"), config);
+        return await new ConfigLoader(tempRoot, logger).load();
+      } finally {
+        await fs.rm(tempRoot, { recursive: true, force: true });
+      }
+    }
+
+    it("takes specPattern and supportFile from e2e when component comes first", async () => {
+      const config = await load(
+        [
+          'import { defineConfig } from "cypress";',
+          "export default defineConfig({",
+          "  component: {",
+          '    devServer: { framework: "react", bundler: "vite" },',
+          '    specPattern: "src/**/*.cy.tsx",',
+          '    supportFile: "cypress/support/component.ts",',
+          "  },",
+          "  e2e: {",
+          '    specPattern: ["cypress/e2e/**/*.cy.ts", "cypress/smoke/**/*.cy.ts"],',
+          '    supportFile: "cypress/support/e2e.ts",',
+          "  },",
+          "});",
+        ].join("\n"),
+      );
+
+      expect(config.specPattern).toEqual([
+        "cypress/e2e/**/*.cy.ts",
+        "cypress/smoke/**/*.cy.ts",
+      ]);
+      expect(config.supportFile).toBe("cypress/support/e2e.ts");
+    });
+
+    it("keeps a glob with brackets whole inside an array", async () => {
+      const config = await load(
+        'export default { e2e: { specPattern: ["cypress/e2e/**/*.cy.[jt]s", "more/*.cy.js"] } };\n',
+      );
+
+      expect(config.specPattern).toEqual(["cypress/e2e/**/*.cy.[jt]s", "more/*.cy.js"]);
+    });
+
+    it("prefers e2e overrides, then top-level values, and skips comments", async () => {
+      const config = await load(
+        [
+          "export default {",
+          '  screenshotsFolder: "shots/all",',
+          '  downloadsFolder: "downloads/all",',
+          '  component: { screenshotsFolder: "shots/component", supportFile: false },',
+          "  e2e: {",
+          '    // specPattern: "old/**/*.cy.js",',
+          '    downloadsFolder: "downloads/e2e",',
+          "  },",
+          "};",
+        ].join("\n"),
+      );
+
+      expect(config.screenshotsDir).toBe("shots/all");
+      expect(config.downloadsDir).toBe("downloads/e2e");
+      expect(config.supportFile).toBeUndefined();
+      expect(config.specPattern).toEqual(["cypress/e2e/**/*.cy.{ts,js,tsx,jsx}"]);
+    });
+
+    it("finds the end of e2e past code with quotes in regexes and templates", async () => {
+      const config = await load(
+        [
+          "module.exports = {",
+          "  e2e: {",
+          "    setupNodeEvents(on) {",
+          "      on('task', { clean: (s) => s.replace(/['\"{]/g, '') + `}${'{'}` });",
+          "    },",
+          "  },",
+          '  component: { specPattern: "src/**/*.cy.tsx" },',
+          "};",
+          "const e2e = { specPattern: 'tests/**/*.cy.js' };",
+        ].join("\n"),
+      );
+
+      expect(config.specPattern).toEqual(["tests/**/*.cy.js"]);
+    });
+
+    it("falls back to the default when only component tests set a specPattern", async () => {
+      const config = await load(
+        "export default { component: { specPattern: 'src/**/*.cy.tsx' }, e2e: {} };\n",
+      );
+
+      expect(config.specPattern).toEqual(["cypress/e2e/**/*.cy.{ts,js,tsx,jsx}"]);
+    });
   });
 
   it("should honor server config overrides for config path and title filtering", async () => {
