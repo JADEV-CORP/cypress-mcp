@@ -282,6 +282,8 @@ describe("OutputParser with report files", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("exited with code 1");
+    expect(result.error).toContain("every spec reported");
+    expect(result.error).not.toContain("stopped before it ended");
     expect(result.error).not.toContain("No report from");
   });
 

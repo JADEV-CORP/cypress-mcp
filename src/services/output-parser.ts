@@ -77,10 +77,14 @@ export class OutputParser {
     reports: readonly SpecReport[],
     specs: readonly string[],
   ): CypressRunResult {
-    const lines = [
-      `Cypress process exited with code ${exitCode ?? "unknown"} but no test failed: the run stopped before it ended.`,
-    ];
     const missing = specsWithoutReport(specs, reports);
+    // With every spec reported, the run did end: something after it (a
+    // plugin, video encoding) set the code, so do not claim tests were lost.
+    const lines = [
+      missing.length > 0 || specs.length === 0
+        ? `Cypress process exited with code ${exitCode ?? "unknown"} but no test failed: the run stopped before it ended.`
+        : `Cypress process exited with code ${exitCode ?? "unknown"} although every spec reported and no test failed.`,
+    ];
     if (missing.length > 0) {
       const listed = missing.slice(0, MAX_LISTED_MISSING_SPECS).join(", ");
       const more =
