@@ -39,7 +39,7 @@ export class ConfigNotFoundError extends CypressMcpError {
   constructor(projectRoot: string, configuredPath?: string) {
     super(
       configuredPath
-        ? `Configured Cypress config file was not found: ${configuredPath}`
+        ? `Configured Cypress config file was not found: ${configuredPath} (project root ${projectRoot})`
         : `No Cypress config file found in ${projectRoot}`,
       "CONFIG_NOT_FOUND",
       configuredPath

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 JADEV GROUP SARL
 // SPDX-License-Identifier: Apache-2.0
 import path from "node:path";
+import { realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 
 /**
@@ -34,6 +35,28 @@ export function resolveProjectRoot(
 ): string {
   const fromEnv = env["CLAUDE_PROJECT_DIR"]?.trim();
   return path.resolve(parseCwdArg(argv) ?? (fromEnv || startDir));
+}
+
+/**
+ * True for a folder too broad to search for Cypress projects: the disk root,
+ * the home folder, or a folder above it. Claude Desktop starts stdio servers
+ * in `/`, and a search from there reaches every repository on the machine.
+ */
+export function isBroadRoot(dir: string, home: string): boolean {
+  const target = canonicalPath(dir);
+  if (path.dirname(target) === target) {
+    return true;
+  }
+  return resolveInsideRoot(target, canonicalPath(home)) !== null;
+}
+
+/** Real path when it exists (symlinks resolved, case as on disk), else resolved. */
+function canonicalPath(dir: string): string {
+  try {
+    return realpathSync.native(dir);
+  } catch {
+    return path.resolve(dir);
+  }
 }
 
 /** Normalize path separators to forward slashes */

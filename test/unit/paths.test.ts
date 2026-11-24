@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
+  isBroadRoot,
   isVersionAtLeast,
   parseCwdArg,
   resolveCypressInstall,
@@ -114,5 +115,36 @@ describe("resolveProjectRoot", () => {
     expect(resolveProjectRoot([], { CLAUDE_PROJECT_DIR: claude }, start)).toBe(claude);
     expect(resolveProjectRoot([], { CLAUDE_PROJECT_DIR: " " }, start)).toBe(start);
     expect(resolveProjectRoot([], {}, start)).toBe(start);
+  });
+});
+
+describe("isBroadRoot", () => {
+  let tmp: string;
+  let home: string;
+
+  beforeAll(async () => {
+    tmp = await fs.realpath(
+      await fs.mkdtemp(path.join(os.tmpdir(), "cypress-mcp-home-")),
+    );
+    home = path.join(tmp, "users", "me");
+    await fs.mkdir(path.join(home, "dev", "shop"), { recursive: true });
+  });
+
+  afterAll(async () => {
+    await fs.rm(tmp, { recursive: true, force: true });
+  });
+
+  it("is true for the disk root, the home folder and the folders above it", () => {
+    expect(isBroadRoot(path.parse(tmp).root, home)).toBe(true);
+    expect(isBroadRoot(tmp, home)).toBe(true);
+    expect(isBroadRoot(path.join(tmp, "users"), home)).toBe(true);
+    expect(isBroadRoot(home, home)).toBe(true);
+    expect(isBroadRoot(`${home}${path.sep}`, home)).toBe(true);
+  });
+
+  it("is false for a folder inside the home folder or beside it", () => {
+    expect(isBroadRoot(path.join(home, "dev"), home)).toBe(false);
+    expect(isBroadRoot(path.join(home, "dev", "shop"), home)).toBe(false);
+    expect(isBroadRoot(path.join(tmp, "users", "other"), home)).toBe(false);
   });
 });

@@ -51,7 +51,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
       try {
         // Only the caller's pattern is checked; the project's own specPattern is trusted.
         if (pattern !== undefined) assertPlainGlob(pattern);
-        const projects = await projectsToList(ctx, project);
+        const { projects, stoppedEarly } = await projectsToList(ctx, project);
 
         const patterns = new Set<string>();
         const specs: { file: string; tests: number; titles?: string[] }[] = [];
@@ -79,6 +79,11 @@ export function register(server: McpServer, ctx: ToolContext): void {
             : [...patterns].join(", ");
         const summary = `${specs.length} spec(s), ${totalTests} test(s) in ${where}`;
         const lines = [summary];
+        if (stoppedEarly) {
+          lines.push(
+            `note: the search for projects stopped ${stoppedEarly}, so some may be missing. Pass project, or start the server with --cwd closer to the projects.`,
+          );
+        }
         for (const spec of specs) {
           lines.push(`${spec.file}: ${spec.tests}`);
           for (const title of spec.titles ?? []) {
@@ -106,26 +111,31 @@ export function register(server: McpServer, ctx: ToolContext): void {
 
 /**
  * The project asked for; else the server root's; else every project under it
- * (a monorepo root has no config of its own).
+ * (a monorepo root has no config of its own), from the search select made.
  */
 async function projectsToList(
   ctx: ToolContext,
   project: string | undefined,
-): Promise<{ ctx: ToolContext; prefix: string }[]> {
+): Promise<{ projects: { ctx: ToolContext; prefix: string }[]; stoppedEarly?: string }> {
   try {
     const selection = await ctx.projects.select({ project });
-    return [selection];
+    return { projects: [selection] };
   } catch (err) {
-    if (!(err instanceof ProjectRequiredError) || err.code !== "PROJECT_REQUIRED") {
+    if (
+      !(err instanceof ProjectRequiredError) ||
+      err.code !== "PROJECT_REQUIRED" ||
+      !err.discovery
+    ) {
       throw err;
     }
-    const folders = await ctx.projects.discover();
-    return folders.map((folder) => {
+    const { projects: folders, stoppedEarly } = err.discovery;
+    const projects = folders.map((folder) => {
       const projectRoot = path.join(ctx.serverRoot, folder);
       return {
         ctx: ctx.projects.context(projectRoot),
         prefix: folder === "." ? "" : folder,
       };
     });
+    return stoppedEarly ? { projects, stoppedEarly } : { projects };
   }
 }

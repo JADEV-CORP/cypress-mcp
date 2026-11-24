@@ -148,6 +148,46 @@ describe("monorepo root", () => {
   });
 });
 
+describe("a server root at or above the home folder", () => {
+  it("is not searched for projects, and the error names it and --cwd", async () => {
+    // HOME points into the temp folder, so the real home is never read.
+    const root = tempRoot();
+    const home = path.join(root, "home", "me");
+    fs.mkdirSync(home, { recursive: true });
+    project(path.join(root, "work", "shop"));
+    const client = await connect(root, { HOME: home, USERPROFILE: home });
+
+    const list = await call(client, "cypress_list_specs");
+    expect(list.isError).toBe(true);
+    expect(list.data["code"]).toBe("CONFIG_NOT_FOUND");
+    expect(list.text).toContain(`No cypress.config.* in the server root ${root},`);
+    expect(list.text).toContain("start the server with --cwd <project folder>");
+    expect(list.text).not.toContain("work/shop");
+
+    const run = await call(client, "cypress_run", {
+      spec: "work/shop/cypress/e2e/pass.cy.js",
+    });
+    expect(run.data["code"]).toBe("CONFIG_NOT_FOUND");
+    expect(run.data["suggestion"]).toContain("--cwd <project folder>");
+
+    const doctor = await call(client, "cypress_doctor", { quick: true });
+    expect(doctor.text).toContain(
+      `fail Project: No cypress.config.* in the server root ${root},`,
+    );
+  });
+
+  it("says when --cwd does not exist", async () => {
+    const missing = path.join(tempRoot(), "no-such-folder");
+    const client = await connect(missing);
+
+    const list = await call(client, "cypress_list_specs");
+    expect(list.data["code"]).toBe("CONFIG_NOT_FOUND");
+    expect(list.text).toContain(
+      `The server root ${missing} does not exist or is not a folder.`,
+    );
+  });
+});
+
 describe("failure context off", () => {
   it("runs the project's config as is, with the reporter and @cypress/grep", async () => {
     const root = tempRoot();
