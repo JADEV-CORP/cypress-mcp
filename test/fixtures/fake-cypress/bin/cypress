@@ -201,6 +201,16 @@ c.unref();`,
     return;
   }
 
+  if (name === "stubborn.cy.js") {
+    // A Cypress that ignores SIGTERM, as one busy shutting down can: only
+    // SIGKILL stops it.
+    process.on("SIGTERM", () => {});
+    fs.writeFileSync(process.env.FAKE_CYPRESS_PIDS, JSON.stringify([process.pid]));
+    emit({ event: "start", total: 1, spec });
+    setInterval(() => {}, 1000);
+    return;
+  }
+
   if (name === "linger.cy.js") {
     // A helper started by setupNodeEvents or cy.exec that inherits stdout and
     // outlives the run. This spec then passes and the process exits normally,

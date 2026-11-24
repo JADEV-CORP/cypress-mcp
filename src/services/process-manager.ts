@@ -51,17 +51,34 @@ export interface RunOptions {
 const sharedQueue: { tail: Promise<void> } = { tail: Promise.resolve() };
 const activeProcesses = new Set<ChildProcess>();
 
-/** Kill every Cypress this server started. Used when the client goes away. */
+/**
+ * Kill every Cypress this server started. Used when the client goes away.
+ * Resolves once each has exited, or was sent SIGKILL after the grace period,
+ * so a caller can exit the server right after. A run leaves the set when it
+ * settles, so one that survives is still found by a second call.
+ */
 export function abortAllRuns(): Promise<void> {
-  const pids = [...activeProcesses]
-    .map((child) => child.pid)
-    .filter((pid) => pid !== undefined);
-  activeProcesses.clear();
-  return Promise.all(
-    pids.map(
-      (pid) => new Promise<void>((resolve) => treeKill(pid, "SIGTERM", () => resolve())),
-    ),
-  ).then(() => undefined);
+  return Promise.all([...activeProcesses].map(stopTree)).then(() => undefined);
+}
+
+/** SIGTERM the process tree, then SIGKILL it if Cypress has not exited in time. */
+function stopTree(child: ChildProcess): Promise<void> {
+  const pid = child.pid;
+  if (pid === undefined || child.exitCode !== null || child.signalCode !== null) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const onExit = (): void => {
+      clearTimeout(forceKill);
+      resolve();
+    };
+    const forceKill = setTimeout(() => {
+      child.off("exit", onExit);
+      treeKill(pid, "SIGKILL", () => resolve());
+    }, FORCE_KILL_AFTER_MS);
+    child.once("exit", onExit);
+    treeKill(pid, "SIGTERM");
+  });
 }
 
 /** Grace period between SIGTERM and SIGKILL when stopping Cypress. */
