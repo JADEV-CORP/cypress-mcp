@@ -13,6 +13,7 @@
 // - when a test fails, snapshots the page at the failing command (URL, a
 //   pruned DOM/ARIA outline, selectors on the page) and hands it to the
 //   cypress-mcp task in an afterEach hook.
+// Credentials in what it records are masked in the browser (see secrets).
 //
 // Plain ES2018 in one IIFE: it runs in whatever browser Cypress drives and is
 // bundled by whatever preprocessor the project uses.
@@ -60,7 +61,7 @@
     guard(function () {
       push(
         state.console,
-        { level: "uncaught", text: clip(messageOf(err), LIMITS.message) },
+        { level: "uncaught", text: scrub(messageOf(err), LIMITS.message) },
         LIMITS.console,
       );
     });
@@ -71,7 +72,7 @@
       if (!attrs || attrs.instrument !== "command") return;
       var entry = {
         name: String(attrs.name || ""),
-        message: clip(stripMarkdown(String(attrs.message || "")), LIMITS.message),
+        message: commandMessage(attrs.name, attrs.message || ""),
         state: attrs.state || "pending",
       };
       state.byId[attrs.id] = entry;
@@ -87,8 +88,7 @@
       var entry = state.byId[attrs.id];
       if (entry) {
         entry.state = attrs.state || entry.state;
-        if (attrs.message)
-          entry.message = clip(stripMarkdown(String(attrs.message)), LIMITS.message);
+        if (attrs.message) entry.message = commandMessage(entry.name, attrs.message);
       }
       if (attrs.state === "failed" && !state.snapshot) {
         state.snapshot = capture(
@@ -196,9 +196,10 @@
       snapshot.failedSelector = selectorOf(failedCommand);
       var win = autWindow();
       if (!win) return;
-      snapshot.url = String(win.location.href);
+      var href = String(win.location.href);
+      snapshot.url = maskUrl(href);
       // Cypress's blank page between tests: the test never visited the app.
-      if (snapshot.url === "about:blank") return;
+      if (href === "about:blank") return;
       var doc = win.document;
       snapshot.pageTitle = clip(doc.title || "", LIMITS.text);
       if (!doc.body) return;
@@ -337,7 +338,8 @@
     for (var i = 0; i < attrs.length; i++) {
       var name = attrs[i].name;
       if (name.indexOf("data-") === 0 && dataCount < 4 && name !== "data-reactroot") {
-        parts.push(name + "=" + JSON.stringify(clip(attrs[i].value, 60)));
+        var shown = secretName(name.slice(5)) ? MASK : clip(attrs[i].value, 60);
+        parts.push(name + "=" + JSON.stringify(shown));
         dataCount++;
         interesting = true;
       }
@@ -361,15 +363,17 @@
       if (fieldName) parts.push("name=" + JSON.stringify(fieldName));
       var placeholder = el.getAttribute("placeholder");
       if (placeholder) parts.push("placeholder=" + JSON.stringify(clip(placeholder, 60)));
-      // Never the value of a password field.
-      if (tag !== "button" && type !== "password" && el.value)
-        parts.push("value=" + JSON.stringify(clip(String(el.value), 60)));
+      // Never the value of a password, key or one-time-code field, nor a token.
+      if (tag !== "button" && el.value) {
+        var secret = secretField(el) || secretValue(String(el.value));
+        parts.push("value=" + JSON.stringify(secret ? MASK : scrub(el.value, 60)));
+      }
       if (el.disabled) parts.push("disabled");
       if (el.checked) parts.push("checked");
     }
     if (tag === "a") {
       var href = el.getAttribute("href");
-      if (href) parts.push("href=" + JSON.stringify(clip(href, 80)));
+      if (href) parts.push("href=" + JSON.stringify(scrub(href, 80, maskUrl)));
     }
     if (tag === "img") {
       var alt = el.getAttribute("alt");
@@ -442,7 +446,7 @@
             state.console,
             {
               level: level,
-              text: clip(
+              text: scrub(
                 Array.prototype.map.call(args, messageOf).join(" "),
                 LIMITS.message,
               ),
@@ -466,7 +470,7 @@
               state.network,
               {
                 method: "GET",
-                url: clip(String(target.src || target.href), 200),
+                url: scrub(target.src || target.href, 200, maskUrl),
                 status: "failed to load",
                 kind: String(target.tagName || "").toLowerCase(),
               },
@@ -475,7 +479,10 @@
           } else if (event.message) {
             push(
               state.console,
-              { level: "error", text: clip("Uncaught " + event.message, LIMITS.message) },
+              {
+                level: "error",
+                text: scrub("Uncaught " + event.message, LIMITS.message),
+              },
               LIMITS.console,
             );
           }
@@ -490,7 +497,10 @@
           state.console,
           {
             level: "error",
-            text: clip("Unhandled rejection: " + messageOf(event.reason), LIMITS.message),
+            text: scrub(
+              "Unhandled rejection: " + messageOf(event.reason),
+              LIMITS.message,
+            ),
           },
           LIMITS.console,
         );
@@ -561,7 +571,7 @@
     guard(function () {
       push(
         state.network,
-        { method: method, url: clip(String(url), 200), status: status },
+        { method: method, url: scrub(url, 200, maskUrl), status: status },
         LIMITS.network,
       );
     });
@@ -666,6 +676,128 @@
       wrapped.skip = original.skip;
       window[name] = wrapped;
     });
+  }
+
+  // ---- secrets ------------------------------------------------------------
+  //
+  // The payload goes to the agent, so credentials are masked before they
+  // leave the browser: in URLs (the page, failed requests, links)
+  // the values of secret parameters, the values of secret form fields, and in
+  // any text JWTs, Bearer credentials and other token shaped strings. Short
+  // harmless values such as page=2 stay readable: they help debugging.
+
+  var MASK = "***";
+  // One word of a parameter or field name that marks a secret: apiKey,
+  // access_token, X-Amz-Signature, one-time-code, cc-csc. Whole words or word
+  // endings, so "keyword", "author" and "design" stay readable.
+  var SECRET_WORD =
+    /^(?:code|sig|pin|pwd|pass|sid|ssn|iban|cc|cvc|cvv|csc)s?$|(?:token|secret|key|passw(?:or)?d|passcode|signature|sess(?:ion)?(?:id)?|credential|auth|jwt|otp)s?$/;
+  var JWT = /\beyJ[\w-]+\.[\w-]+(?:\.[\w-]*)?/g;
+  // "Bearer undefined" is kept: it is the bug, not a secret.
+  var BEARER = /\b([Bb]earer|Basic)\s+(?!(?:undefined|null)\b)[\w.~+/=-]+/g;
+  // key=value after ? # & or ;: a URL parameter, also inside console text.
+  var PARAM = /([?#&;])([^?#&;=\s]+)=([^?#&;\s"'<>]+)/g;
+  // 32 url-safe characters or more. API keys, session ids and signatures are
+  // 32 to 64 long or more; ids worth reading are shorter (ObjectId 24, ULID
+  // 26) or made of short groups (UUID, slugs), which tokenShaped lets through.
+  var RUN = /[\w-]{32,}/g;
+
+  /** Text with tokens, Bearer credentials and secret parameters masked. */
+  function maskText(text) {
+    return String(text)
+      .replace(JWT, MASK)
+      .replace(BEARER, "$1 " + MASK)
+      .replace(PARAM, function (match, separator, key, value) {
+        return secretName(key) || secretValue(value)
+          ? separator + key + "=" + MASK
+          : match;
+      })
+      .replace(RUN, function (run) {
+        return tokenShaped(run) ? MASK : run;
+      });
+  }
+
+  /** A URL with its scheme, host, path and parameter names, secrets masked. */
+  function maskUrl(url) {
+    var text = String(url).replace(
+      /^([a-z][\w+.-]*:\/\/)[^/?#@\s]*@/i,
+      "$1" + MASK + "@",
+    );
+    var cut = text.search(/[?#;]/);
+    return cut === -1 ? text : text.slice(0, cut) + maskText(text.slice(cut));
+  }
+
+  /** Whether a parameter, field or attribute name looks like it holds a secret. */
+  function secretName(name) {
+    var words = String(name || "")
+      .replace(/([a-z\d])([A-Z])/g, "$1 $2")
+      .toLowerCase()
+      .split(/[^a-z\d]+/);
+    for (var i = 0; i < words.length; i++) {
+      if (SECRET_WORD.test(words[i])) return true;
+    }
+    return false;
+  }
+
+  /** Whether a form field holds a secret, by its name, id, autocomplete or type. */
+  function secretField(el) {
+    var attrs = ["name", "id", "autocomplete", "type"];
+    for (var i = 0; i < attrs.length; i++) {
+      if (secretName(el.getAttribute(attrs[i]))) return true;
+    }
+    return false;
+  }
+
+  /** A whole value that is a token: 32+ characters of a key alphabet, token shaped. */
+  function secretValue(value) {
+    var text = value;
+    try {
+      text = decodeURIComponent(value);
+    } catch {
+      // Malformed percent-encoding: check it as it is.
+    }
+    return /^[\w+/=.~-]{32,}$/.test(text) && tokenShaped(text);
+  }
+
+  /**
+   * Whether text has 13 or more letters and digits in a row, mixed. A random
+   * key always does; words, numbers, UUIDs (groups of 12 at most) and slugs
+   * do not.
+   */
+  function tokenShaped(text) {
+    var runs = String(text).match(/[A-Za-z\d]{13,}/g) || [];
+    for (var i = 0; i < runs.length; i++) {
+      if (/\d/.test(runs[i]) && /[A-Za-z]/.test(runs[i])) return true;
+    }
+    return false;
+  }
+
+  /**
+   * A command's message, masked. The selectors of get and find are kept as
+   * they are: selectorOf queries the page with them, and test ids often end
+   * in a database id that would read as a token.
+   */
+  function commandMessage(name, message) {
+    var text = stripMarkdown(String(message));
+    return name === "get" || name === "find"
+      ? clip(text, LIMITS.message)
+      : scrub(text, LIMITS.message);
+  }
+
+  /**
+   * App text for the payload, masked (maskText, or maskUrl) and clipped. Long
+   * text is cut first to bound the work. A token the cut leaves shorter than
+   * 32 characters at the end would not be recognised, so that piece goes too.
+   */
+  function scrub(value, max, mask) {
+    var text = String(value == null ? "" : value);
+    if (text.length > max * 2) {
+      text = text.slice(0, max * 2);
+      var tail = /[\w-]+$/.exec(text);
+      if (tail && tail[0].length < 32) text = text.slice(0, tail.index);
+      text += "...";
+    }
+    return clip((mask || maskText)(text), max);
   }
 
   // ---- helpers ------------------------------------------------------------
