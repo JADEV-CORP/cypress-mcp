@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.1 (unreleased)
+## 0.4.1 (2026-11-24)
 
 Fixes from a review of 0.4.0 run against real Cypress, and a CLI that people can use as well as agents.
 
