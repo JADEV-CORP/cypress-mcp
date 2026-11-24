@@ -201,6 +201,18 @@ c.unref();`,
     return;
   }
 
+  if (name === "linger.cy.js") {
+    // A helper started by setupNodeEvents or cy.exec that inherits stdout and
+    // outlives the run. This spec then passes and the process exits normally,
+    // but its output stays open until the helper ends.
+    const helper = spawn(process.execPath, ["-e", "setTimeout(() => {}, 20000)"], {
+      detached: true,
+      stdio: ["ignore", "inherit", "inherit"],
+    });
+    fs.writeFileSync(process.env.FAKE_CYPRESS_PIDS, JSON.stringify([helper.pid]));
+    helper.unref();
+  }
+
   const filter = browserOptions.filter ?? {};
   const repeat = browserOptions.repeat > 1 ? browserOptions.repeat : 1;
   const wanted = (fullTitle) =>

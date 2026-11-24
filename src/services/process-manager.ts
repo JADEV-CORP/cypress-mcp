@@ -67,8 +67,8 @@ export function abortAllRuns(): Promise<void> {
 /** Grace period between SIGTERM and SIGKILL when stopping Cypress. */
 const FORCE_KILL_AFTER_MS = 5_000;
 /**
- * After a killed Cypress exits, how long to wait for its output to close. A
- * helper that left the process tree can hold the pipes open for minutes.
+ * After Cypress exits, how long to wait for its output to close. A helper
+ * that outlives it, or left the process tree, can hold the pipes for minutes.
  */
 const PIPE_CLOSE_AFTER_EXIT_MS = 2_000;
 const CYPRESS_INFO_TIMEOUT_MS = 60_000;
@@ -377,13 +377,17 @@ export class ProcessManager {
       };
 
       child.on("close", (exitCode) => finish(() => settle(exitCode)));
-      // "close" waits for every process holding stdout and stderr. When we
-      // killed Cypress, a helper that escaped the tree kill (reparented, or
-      // started during shutdown) would block the queue until it ends.
+      // "close" waits for every process holding stdout and stderr. A helper
+      // that outlives Cypress (started by setupNodeEvents or cy.exec, or one
+      // that escaped our tree kill) would hold the run, and the queue behind
+      // it, until it ends. So the output gets a short grace after any exit.
       child.on("exit", (exitCode) => {
-        if (!killing || settled) {
+        if (settled) {
           return;
         }
+        // Cypress is done: a timeout tick during the grace must not turn a
+        // run that finished into a timeout and drop its reports.
+        clearTimeout(timer);
         pipeCloseTimer = setTimeout(() => {
           this.logger.warn(
             "Cypress exited but a helper still holds its output; closing it",

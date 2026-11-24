@@ -491,6 +491,31 @@ describe("progress, cancellation and timeouts (B2)", () => {
     }
   }, 30_000);
 
+  it("ends a run that exited normally while a helper keeps the output open", async () => {
+    // Cypress exits at once but its output stays open, so the 2 s run
+    // timeout fires after the exit: the run still passes with its report.
+    const lingerSpec = path.join(root, "cypress", "e2e", "linger.cy.js");
+    fs.writeFileSync(lingerSpec, 'it("shows the title", () => cy.visit("/"));\n');
+    try {
+      const { isError, structured } = await call("cypress_run", {
+        spec: "cypress/e2e/linger.cy.js",
+        timeout: 2_000,
+      });
+
+      expect(isError).toBe(false);
+      expect(structured.data).toMatchObject({
+        status: "passed",
+        tests: [{ fullTitle: "Shop basics shows the title", state: "passed" }],
+      });
+    } finally {
+      const [helper] = fs.existsSync(pidFile)
+        ? (JSON.parse(fs.readFileSync(pidFile, "utf-8")) as number[])
+        : [];
+      if (helper && alive(helper)) process.kill(helper, "SIGKILL");
+      fs.rmSync(lingerSpec, { force: true });
+    }
+  }, 30_000);
+
   it("keeps the partial run and names the test that hung on timeout", async () => {
     const { isError, text, structured } = await call("cypress_run", {
       spec: "cypress/e2e/hang.cy.js",
