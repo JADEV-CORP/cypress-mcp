@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
+  - name: Question
+    url: https://github.com/JADEV-CORP/cypress-mcp/discussions/categories/q-a
+    about: Ask how to set up or use cypress-mcp. Issues are for bugs and features.
   - name: Security vulnerability
     url: https://github.com/JADEV-CORP/cypress-mcp/security/advisories/new
     about: Report privately. Do not open a public issue.
