@@ -20,7 +20,7 @@ export const CAPABILITIES = {
 const REMOVED_CAPS: ReadonlyMap<string, string> = new Map([
   [
     "legacy",
-    "legacy was removed in 0.5: the README maps each 0.2 tool name to its replacement, https://github.com/jams4code/cypress-mcp#upgrading",
+    "legacy was removed in 0.5: the README maps each 0.2 tool name to its replacement, https://github.com/JADEV-CORP/cypress-mcp#upgrading",
   ],
 ]);
 

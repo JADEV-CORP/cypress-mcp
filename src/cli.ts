@@ -95,7 +95,7 @@ client:
 /** Printed instead of starting the server when a person runs it in a terminal. */
 const SERVER_NOTE = `cypress-mcp is an MCP server: an MCP client (Claude Code, Cursor, VS Code...)
 starts it and talks to it over stdin. To add it to a client, run cypress-mcp
-init in the project, or see https://github.com/jams4code/cypress-mcp#setup
+init in the project, or see https://github.com/JADEV-CORP/cypress-mcp#setup
 
 From a terminal, use a command:
   cypress-mcp init            write the MCP client config for this project

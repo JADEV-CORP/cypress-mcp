@@ -77,7 +77,7 @@ Dependabot opens grouped dependency PRs every Monday. The runtime dependencies a
 
 Publishing uses npm trusted publishing (OIDC), so there is no npm token secret. The package's trusted publisher on npmjs.com must point at this repository and `release.yml`. If a version is already on npm, the workflow skips the publish and still creates the GitHub release.
 
-The MCP Registry job logs in with the workflow's GitHub OIDC token, which covers the `io.github.jams4code` namespace, so it needs no secret either. The registry checks that the npm package's `mcpName` matches `server.json`, which is why it runs after the npm publish. It skips versions already in the registry. `mcp-publisher` is pinned in `release.yml` and verified against its Sigstore bundle before it runs.
+The MCP Registry job logs in with DNS authentication for the `com.jadev-corp` namespace: a TXT record on the jadev-corp.com apex holds the public key, and the matching Ed25519 private key is the `MCP_PRIVATE_KEY` secret of the `release` environment. To rotate it, generate a new key, replace the TXT record (remove the old one, the registry tries a stale record first) and update the secret. The registry checks that the npm package's `mcpName` matches `server.json`, which is why it runs after the npm publish. It skips versions already in the registry. `mcp-publisher` is pinned in `release.yml` and verified against its Sigstore bundle before it runs.
 
 ## License
 

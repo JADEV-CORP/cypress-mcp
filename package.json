@@ -2,7 +2,7 @@
   "name": "cypress-mcp",
   "version": "0.5.0",
   "description": "MCP server and CLI that let AI coding agents run and debug Cypress tests: compact failures with file:line, error and screenshot, flaky test detection, Cypress Cloud recording.",
-  "mcpName": "io.github.jams4code/cypress-mcp",
+  "mcpName": "com.jadev-corp/cypress-mcp",
   "type": "module",
   "bin": {
     "cypress-mcp": "bin/cypress-mcp.mjs"
@@ -51,12 +51,12 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jams4code/cypress-mcp.git"
+    "url": "git+https://github.com/JADEV-CORP/cypress-mcp.git"
   },
   "bugs": {
-    "url": "https://github.com/jams4code/cypress-mcp/issues"
+    "url": "https://github.com/JADEV-CORP/cypress-mcp/issues"
   },
-  "homepage": "https://github.com/jams4code/cypress-mcp#readme",
+  "homepage": "https://github.com/JADEV-CORP/cypress-mcp#readme",
   "engines": {
     "node": ">=22.12.0"
   },

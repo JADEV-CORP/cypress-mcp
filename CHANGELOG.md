@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- The repository moved to [JADEV-CORP/cypress-mcp](https://github.com/JADEV-CORP/cypress-mcp). Old `jams4code/cypress-mcp` links and clones keep working through GitHub's redirect.
+- The server is listed in the MCP Registry as `com.jadev-corp/cypress-mcp`. The old entry `io.github.jams4code/cypress-mcp` stays at 0.5.0 and gets no new versions. The npm package name does not change.
+
 ## 0.5.0 (2026-11-24)
 
 Setup in one command, a smaller run tool, and the 0.2 tool names gone as announced in 0.4.0.

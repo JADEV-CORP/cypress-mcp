@@ -28,7 +28,7 @@ describe("cypress-mcp without a command", () => {
 
     const note = terminal.err.join("\n");
     expect(note).toContain("MCP server");
-    expect(note).toContain("https://github.com/jams4code/cypress-mcp#setup");
+    expect(note).toContain("https://github.com/JADEV-CORP/cypress-mcp#setup");
     expect(note).toContain("cypress-mcp run");
     expect(note).toContain("cypress-mcp doctor");
     expect(note).toContain("cypress-mcp list");

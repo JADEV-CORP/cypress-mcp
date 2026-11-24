@@ -2,7 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/cypress-mcp.svg)](https://www.npmjs.com/package/cypress-mcp)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![CI](https://github.com/jams4code/cypress-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/jams4code/cypress-mcp/actions/workflows/ci.yml)
+[![CI](https://github.com/JADEV-CORP/cypress-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/JADEV-CORP/cypress-mcp/actions/workflows/ci.yml)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D22.12-brightgreen.svg)](https://nodejs.org)
 
 MCP server and CLI that let AI coding agents run and debug Cypress tests.
@@ -351,7 +351,7 @@ Keep secrets such as `CYPRESS_RECORD_KEY` in the user file, not the committed pr
 
 ### Which cypress-mcp is this?
 
-This README is for the `cypress-mcp` package on npm, built from [jams4code/cypress-mcp](https://github.com/jams4code/cypress-mcp). Two unrelated GitHub projects, `yashpreetbathla/cypress-mcp` and `sbtungd2/cypress-mcp`, tell their users to run `npx cypress-mcp` or `npm install cypress-mcp`. Those commands install this package, not their code, and their flags (such as `--port` or `--base-url`) do nothing here. If you followed one of their guides, use that project's own install steps.
+This README is for the `cypress-mcp` package on npm, built from [JADEV-CORP/cypress-mcp](https://github.com/JADEV-CORP/cypress-mcp). Two unrelated GitHub projects, `yashpreetbathla/cypress-mcp` and `sbtungd2/cypress-mcp`, tell their users to run `npx cypress-mcp` or `npm install cypress-mcp`. Those commands install this package, not their code, and their flags (such as `--port` or `--base-url`) do nothing here. If you followed one of their guides, use that project's own install steps.
 
 ## Tools
 
@@ -438,7 +438,7 @@ The output is the same text as the MCP tools, with absolute screenshot paths. Ex
 
 ## How It Works
 
-<p align="center"><img src="https://raw.githubusercontent.com/jams4code/cypress-mcp/main/docs/images/how-it-works.png" alt="The agent calls cypress-mcp over MCP stdio; cypress-mcp runs Cypress with a wrapper config in a per-run folder and returns the failure with file:line, error, page and screenshot" width="860"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/JADEV-CORP/cypress-mcp/main/docs/images/how-it-works.png" alt="The agent calls cypress-mcp over MCP stdio; cypress-mcp runs Cypress with a wrapper config in a per-run folder and returns the failure with file:line, error, page and screenshot" width="860"></p>
 
 - **Protocol**: stdio, built on the MCP TypeScript SDK v2. It serves 2025 clients (the `initialize` handshake) and 2026-07-28 clients (per-request metadata, `server/discover`) from the same process. Server `instructions` give agents the five lines they need at startup.
 - **One Cypress at a time**: later calls queue, across projects. Several specs, a glob or the whole suite run in one launch. Each run reports a progress notification per test to clients that ask for one; cancelling the request stops the whole Cypress process tree; a run that hits its timeout returns the tests it finished and the one that hung.
@@ -452,7 +452,7 @@ The output is the same text as the MCP tools, with absolute screenshot paths. Ex
 
 ## Agent Workflow
 
-<p align="center"><img src="https://raw.githubusercontent.com/jams4code/cypress-mcp/main/docs/images/agent-workflow.png" alt="Agent workflow: list specs, run, if tests fail and the result is not enough call get_failure, fix the app or the test, rerun by path:line or repeat; doctor only when Cypress cannot start" width="860"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/JADEV-CORP/cypress-mcp/main/docs/images/agent-workflow.png" alt="Agent workflow: list specs, run, if tests fail and the result is not enough call get_failure, fix the app or the test, rerun by path:line or repeat; doctor only when Cypress cannot start" width="860"></p>
 
 ## Flaky Tests
 
@@ -530,13 +530,13 @@ Env values passed to `cypress_run` (`env`) or the CLI (`--env`) reach your tests
 | Registry | Package | Status |
 |----------|---------|--------|
 | **npm** | [`cypress-mcp`](https://www.npmjs.com/package/cypress-mcp) | Published |
-| **MCP Registry** | `io.github.jams4code/cypress-mcp` | Published by the release workflow |
-| **GitHub** | [`jams4code/cypress-mcp`](https://github.com/jams4code/cypress-mcp) | Source |
+| **MCP Registry** | `com.jadev-corp/cypress-mcp` | Published by the release workflow |
+| **GitHub** | [`JADEV-CORP/cypress-mcp`](https://github.com/JADEV-CORP/cypress-mcp) | Source |
 
 ## Development
 
 ```bash
-git clone https://github.com/jams4code/cypress-mcp.git
+git clone https://github.com/JADEV-CORP/cypress-mcp.git
 cd cypress-mcp
 npm install
 npm run build

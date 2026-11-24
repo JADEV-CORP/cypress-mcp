@@ -101,14 +101,17 @@ jobs:
 
   # Lists the server in the official MCP Registry (registry.modelcontextprotocol.io).
   # Runs after the npm publish: the registry checks that the npm package exists
-  # and that its package.json mcpName matches server.json. Login uses the
-  # workflow's GitHub OIDC token, which grants the io.github.jams4code namespace.
+  # and that its package.json mcpName matches server.json. Login is DNS based:
+  # the TXT record "v=MCPv1; k=ed25519; p=..." on the jadev-corp.com apex grants
+  # the com.jadev-corp namespace, and MCP_PRIVATE_KEY (Ed25519, hex) signs the
+  # login. The key is a secret of the "release" environment, so this job runs
+  # in that environment too, and like the npm job only for v* tags.
   mcp-registry:
     needs: publish
     runs-on: ubuntu-latest
+    environment: release
     permissions:
       contents: read
-      id-token: write
     env:
       # Raise deliberately; the binary is verified against this tag's Sigstore bundle.
       MCP_PUBLISHER_VERSION: v1.8.9
@@ -162,8 +165,11 @@ jobs:
           tar xzf "$archive" mcp-publisher
           rm -f "$archive" "$archive.sigstore.json"
 
+      # The key reaches mcp-publisher through the environment, never the command line.
       - name: Publish to the MCP Registry
         if: steps.registry.outputs.published != 'true'
+        env:
+          MCP_PRIVATE_KEY: ${{ secrets.MCP_PRIVATE_KEY }}
         run: |
-          ./mcp-publisher login github-oidc
+          ./mcp-publisher login dns --domain jadev-corp.com
           ./mcp-publisher publish
