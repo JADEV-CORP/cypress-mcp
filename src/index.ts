@@ -4,23 +4,15 @@ import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { createServer, SERVER_VERSION } from "./server.js";
 import { createToolContext } from "./context.js";
 import { CAPABILITIES, parseCaps } from "./caps.js";
-import { CLI_USAGE, runCli } from "./cli.js";
+import { runCommand } from "./cli.js";
 import { createLogger } from "./utils/logger.js";
 import { resolveProjectRoot } from "./utils/paths.js";
 import { abortAllRuns } from "./services/process-manager.js";
 
 export async function main(argv: string[]): Promise<void> {
-  const [command] = argv;
-  if (command === "run") {
-    process.exitCode = await runCli(argv.slice(1));
-    return;
-  }
-  if (command === "--help" || command === "-h" || command === "help") {
-    process.stdout.write(`${CLI_USAGE}\n`);
-    return;
-  }
-  if (command === "--version" || command === "-V") {
-    process.stdout.write(`${SERVER_VERSION}\n`);
+  const exitCode = await runCommand(argv);
+  if (exitCode !== undefined) {
+    process.exitCode = exitCode;
     return;
   }
 

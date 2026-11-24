@@ -1,7 +1,7 @@
 // Copyright (c) 2026 JADEV GROUP SARL
 // SPDX-License-Identifier: Apache-2.0
 import { z } from "zod";
-import type { McpServer } from "@modelcontextprotocol/server";
+import type { CallToolResult, McpServer } from "@modelcontextprotocol/server";
 import type { ToolContext } from "../../types/index.js";
 import { assertPlainGlob } from "../../services/spec-finder.js";
 import { finish } from "../../format/compact.js";
@@ -49,64 +49,72 @@ export function register(server: McpServer, ctx: ToolContext): void {
     },
     async ({ pattern, titles, project }) => {
       try {
-        // Only the caller's pattern is checked; the project's own specPattern is trusted.
-        if (pattern !== undefined) assertPlainGlob(pattern);
-        const { projects, stoppedEarly } = await projectsToList(ctx, project);
-
-        const patterns = new Set<string>();
-        const specs: { file: string; tests: number; titles?: string[] }[] = [];
-        for (const { ctx: projectCtx, prefix } of projects) {
-          const config = await projectCtx.configLoader.load();
-          const projectPatterns =
-            pattern === undefined ? [...config.specPattern] : [pattern];
-          projectPatterns.forEach((p) => patterns.add(displayPath(prefix, p)));
-          const files = await projectCtx.specFinder.findSpecs(projectPatterns);
-          for (const file of files) {
-            const parsed = await projectCtx.specFinder.parse(file);
-            const tests = parsed?.tests ?? [];
-            specs.push({
-              file: displayPath(prefix, file),
-              tests: tests.length,
-              ...(titles ? { titles: tests.map((test) => test.fullTitle) } : {}),
-            });
-          }
-        }
-        const totalTests = specs.reduce((sum, spec) => sum + spec.tests, 0);
-
-        const where =
-          projects.length > 1
-            ? `${projects.length} projects (${projects.map((p) => p.prefix || ".").join(", ")})`
-            : [...patterns].join(", ");
-        const summary = `${specs.length} spec(s), ${totalTests} test(s) in ${where}`;
-        const lines = [summary];
-        if (stoppedEarly) {
-          lines.push(
-            `note: the search for projects stopped ${stoppedEarly}, so some may be missing. Pass project, or start the server with --cwd closer to the projects.`,
-          );
-        }
-        for (const spec of specs) {
-          lines.push(`${spec.file}: ${spec.tests}`);
-          for (const title of spec.titles ?? []) {
-            lines.push(`  ${title}`);
-          }
-        }
-        const nextActions =
-          specs.length === 0
-            ? ["check the pattern, or the specPattern in the Cypress config"]
-            : [];
-
-        return textResult(finish(lines, nextActions), {
-          ok: true,
-          tool: TOOL,
-          summary,
-          data: { pattern: [...patterns], total: specs.length, totalTests, specs },
-          nextActions,
-        });
+        return await listSpecsResult(ctx, { pattern, titles, project });
       } catch (err) {
         return errorResult(TOOL, err, ctx.logger);
       }
     },
   );
+}
+
+/** Text and structured result of the listing. Also used by the CLI. */
+export async function listSpecsResult(
+  ctx: ToolContext,
+  input: { pattern?: string; titles?: boolean; project?: string },
+): Promise<CallToolResult> {
+  const { pattern, titles } = input;
+  // Only the caller's pattern is checked; the project's own specPattern is trusted.
+  if (pattern !== undefined) assertPlainGlob(pattern);
+  const { projects, stoppedEarly } = await projectsToList(ctx, input.project);
+
+  const patterns = new Set<string>();
+  const specs: { file: string; tests: number; titles?: string[] }[] = [];
+  for (const { ctx: projectCtx, prefix } of projects) {
+    const config = await projectCtx.configLoader.load();
+    const projectPatterns = pattern === undefined ? [...config.specPattern] : [pattern];
+    projectPatterns.forEach((p) => patterns.add(displayPath(prefix, p)));
+    const files = await projectCtx.specFinder.findSpecs(projectPatterns);
+    for (const file of files) {
+      const parsed = await projectCtx.specFinder.parse(file);
+      const tests = parsed?.tests ?? [];
+      specs.push({
+        file: displayPath(prefix, file),
+        tests: tests.length,
+        ...(titles ? { titles: tests.map((test) => test.fullTitle) } : {}),
+      });
+    }
+  }
+  const totalTests = specs.reduce((sum, spec) => sum + spec.tests, 0);
+
+  const where =
+    projects.length > 1
+      ? `${projects.length} projects (${projects.map((p) => p.prefix || ".").join(", ")})`
+      : [...patterns].join(", ");
+  const summary = `${specs.length} spec(s), ${totalTests} test(s) in ${where}`;
+  const lines = [summary];
+  if (stoppedEarly) {
+    lines.push(
+      `note: the search for projects stopped ${stoppedEarly}, so some may be missing. Pass project, or start the server with --cwd closer to the projects.`,
+    );
+  }
+  for (const spec of specs) {
+    lines.push(`${spec.file}: ${spec.tests}`);
+    for (const title of spec.titles ?? []) {
+      lines.push(`  ${title}`);
+    }
+  }
+  const nextActions =
+    specs.length === 0
+      ? ["check the pattern, or the specPattern in the Cypress config"]
+      : [];
+
+  return textResult(finish(lines, nextActions), {
+    ok: true,
+    tool: TOOL,
+    summary,
+    data: { pattern: [...patterns], total: specs.length, totalTests, specs },
+    nextActions,
+  });
 }
 
 /**

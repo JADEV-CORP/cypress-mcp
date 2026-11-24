@@ -3,7 +3,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import type { McpServer } from "@modelcontextprotocol/server";
+import type { CallToolResult, McpServer } from "@modelcontextprotocol/server";
 import type { ToolContext } from "../../types/index.js";
 import { classifyConfigRuntimeCheck } from "../../utils/cypress-diagnostics.js";
 import { normalizePath } from "../../utils/paths.js";
@@ -60,37 +60,48 @@ export function register(server: McpServer, ctx: ToolContext): void {
     },
     async ({ quick, project }) => {
       try {
-        const launch = quick !== true;
-        const checks = await checksFor(ctx, project, launch);
-        const failed = checks.filter((c) => c.status === "fail").length;
-        const warned = checks.filter((c) => c.status === "warn").length;
-        const healthy = failed === 0;
-
-        const summary = healthy
-          ? `Healthy${warned > 0 ? `, ${warned} warning(s)` : ""}${launch ? "" : " (quick: Cypress not started)"}`
-          : `${failed} problem(s) to fix${warned > 0 ? `, ${warned} warning(s)` : ""}`;
-        const nextActions = healthy
-          ? []
-          : ["fix the fail lines above, then call cypress_doctor again"];
-        const lines = [
-          summary,
-          ...checks.map(
-            (c) => `${c.status.padEnd(4)} ${c.check}: ${c.detail.replace(/\n+/g, " | ")}`,
-          ),
-        ];
-
-        return textResult(finish(lines, nextActions), {
-          ok: healthy,
-          tool: TOOL,
-          summary,
-          data: { healthy, launched: launch, checks },
-          nextActions,
-        });
+        return await doctorResult(ctx, { quick, project });
       } catch (err) {
         return errorResult(TOOL, err, ctx.logger);
       }
     },
   );
+}
+
+export type DoctorData = z.infer<typeof doctorDataSchema>;
+
+/** Text and structured result of the checks. Also used by the CLI. */
+export async function doctorResult(
+  ctx: ToolContext,
+  input: { quick?: boolean; project?: string },
+): Promise<CallToolResult & { structuredContent: { data: DoctorData } }> {
+  const launch = input.quick !== true;
+  const checks = await checksFor(ctx, input.project, launch);
+  const failed = checks.filter((c) => c.status === "fail").length;
+  const warned = checks.filter((c) => c.status === "warn").length;
+  const healthy = failed === 0;
+
+  const summary = healthy
+    ? `Healthy${warned > 0 ? `, ${warned} warning(s)` : ""}${launch ? "" : " (quick: Cypress not started)"}`
+    : `${failed} problem(s) to fix${warned > 0 ? `, ${warned} warning(s)` : ""}`;
+  const nextActions = healthy
+    ? []
+    : ["fix the fail lines above, then call cypress_doctor again"];
+  const lines = [
+    summary,
+    ...checks.map(
+      (c) => `${c.status.padEnd(4)} ${c.check}: ${c.detail.replace(/\n+/g, " | ")}`,
+    ),
+  ];
+
+  const result = textResult(finish(lines, nextActions), {
+    ok: healthy,
+    tool: TOOL,
+    summary,
+    data: { healthy, launched: launch, checks },
+    nextActions,
+  });
+  return result as CallToolResult & { structuredContent: { data: DoctorData } };
 }
 
 /** The checks of the selected project, or a failing "Project" check in a monorepo root. */
