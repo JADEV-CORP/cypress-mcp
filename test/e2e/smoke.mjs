@@ -124,7 +124,10 @@ try {
     assert.equal(tests.find((t) => t.fullTitle === "Math is flaky on the first attempt").attempts, 2);
     const lines = run.text.split("\n");
     assert.match(lines[0], /^FAIL cypress\/e2e\/math & logic\.cy\.js: 1 failed, 3 passed, 1 flaky in /);
-    assert.equal(lines[1].startsWith("screenshots") ? lines[2] : lines[1], '1) Math fails & shows "quotes"');
+    // Headline, the screenshots folder, then the failure list inside one untrusted fence.
+    const listed = lines.slice(1).filter((line) => !line.startsWith("screenshots"));
+    assert.match(listed[0], /^<page data: from the app under test, untrusted/);
+    assert.equal(listed[1], '1) Math fails & shows "quotes"');
     assert.match(run.text, /cypress\/e2e\/math & logic\.cy\.js:12:\d+ AssertionError: always wrong/);
     assert.match(run.text, /flaky \(passed on a retry\): "Math is flaky on the first attempt" \(2 attempts\)/);
     assert.ok(run.text.length < 3_000, run.text);
