@@ -866,6 +866,31 @@ describe("targets: several specs, globs, file:line, repeat, component (0.4)", ()
     );
   });
 
+  it("reports a crash partway as an error that names the spec without a report", async () => {
+    // The renderer dies in the second spec: Cypress exits 1, the first
+    // spec's report says all passed, and the second wrote none.
+    const crashSpec = path.join(root, "cypress", "e2e", "crash.cy.js");
+    fs.writeFileSync(crashSpec, 'it("loads the page", () => cy.visit("/"));\n');
+    try {
+      const { isError, text, structured } = await call("cypress_run", {
+        spec: ["cypress/e2e/pass.cy.js", "cypress/e2e/crash.cy.js"],
+      });
+
+      expect(isError).toBe(true);
+      expect(structured.data).toMatchObject({
+        status: "error",
+        stats: { passing: 1, failing: 0 },
+      });
+      expect(text.split("\n")[0]).toBe(
+        `ERROR 2 specs: Cypress stopped partway; 1 passed before it (runId ${structured.runId})`,
+      );
+      expect(text).toContain("Cypress process exited with code 1");
+      expect(text).toContain("No report from cypress/e2e/crash.cy.js");
+    } finally {
+      fs.rmSync(crashSpec, { force: true });
+    }
+  });
+
   it("passes a glob to Cypress as written", async () => {
     const { structured } = await call("cypress_run", { spec: "cypress/e2e/p*.cy.js" });
     const [args] = runs();

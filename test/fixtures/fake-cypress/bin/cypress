@@ -152,6 +152,18 @@ for (const [index, spec] of specs.entries()) {
     continue;
   }
 
+  if (name === "crash.cy.js") {
+    // What Cypress prints when the browser renderer dies mid-spec. The spec
+    // counts in the exit code, but its reporter never ends: no report.
+    console.log(`  Running:  crash.cy.js (${index + 1} of ${specs.length})\n`);
+    emit({ event: "start", total: 1, spec });
+    emit({ event: "test", title: "loads the page", fullTitle: "Crash loads the page" });
+    console.log("We detected that the Electron Renderer process just crashed.");
+    console.log("We have failed the current spec but will continue running the next spec.");
+    process.exitCode = (process.exitCode || 0) + 1;
+    continue;
+  }
+
   if (name === "escape.cy.js") {
     // A helper that left the process tree (its parent exited, so a tree kill
     // cannot find it) but still holds this process's stdout and stderr.

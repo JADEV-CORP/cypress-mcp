@@ -119,7 +119,9 @@ function errorDescription(record: RunRecord): string {
     ? "the spec did not compile, no test ran"
     : record.result.errorKind === "timeout"
       ? "the run timed out"
-      : "Cypress stopped before the tests ran";
+      : record.result.stats.tests > 0
+        ? `Cypress stopped partway; ${counts(record)} before it`
+        : "Cypress stopped before the tests ran";
 }
 
 /**

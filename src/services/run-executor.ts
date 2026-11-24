@@ -224,7 +224,13 @@ async function runOnce(
     type: "done",
     workspace,
     raw,
-    result: ctx.outputParser.parse(raw.stdout, raw.stderr, raw.exitCode, reports),
+    result: ctx.outputParser.parse(
+      raw.stdout,
+      raw.stderr,
+      raw.exitCode,
+      reports,
+      request.specs,
+    ),
     reports: reports.length,
   };
 }

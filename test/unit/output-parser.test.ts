@@ -246,4 +246,56 @@ describe("OutputParser with report files", () => {
       },
     ]);
   });
+
+  it("does not pass a run that crashed before a spec wrote its report", () => {
+    const parser = new OutputParser(createLogger(false));
+    const stdout =
+      "We detected that the Electron Renderer process just crashed.\nWe have failed the current spec but will continue running the next spec.";
+    const result = parser.parse(
+      stdout,
+      "",
+      1,
+      [report("cypress/e2e/a.cy.js", false)],
+      ["cypress/e2e/a.cy.js", "cypress/e2e/b.cy.js"],
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.errorKind).toBeUndefined();
+    expect(result.error).toContain("exited with code 1");
+    expect(result.error).toContain("No report from cypress/e2e/b.cy.js");
+    expect(result.error).not.toContain("cypress/e2e/a.cy.js");
+    expect(result.error).toContain("Renderer process just crashed");
+    // What did run is kept.
+    expect(result.stats).toMatchObject({ tests: 1, passing: 1, failing: 0 });
+    expect(result.tests.map((t) => t.spec)).toEqual(["cypress/e2e/a.cy.js"]);
+  });
+
+  it("does not pass a non-zero exit without failures even when every spec reported", () => {
+    const parser = new OutputParser(createLogger(false));
+    const result = parser.parse(
+      "",
+      "Error: after:run handler threw",
+      1,
+      [report("a.cy.js", false)],
+      ["a.cy.js"],
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("exited with code 1");
+    expect(result.error).not.toContain("No report from");
+  });
+
+  it("keeps a clean exit a pass when a spec wrote no report", () => {
+    const parser = new OutputParser(createLogger(false));
+    const result = parser.parse(
+      "",
+      "",
+      0,
+      [report("a.cy.js", false)],
+      ["a.cy.js", "empty.cy.js"],
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.error).toBeUndefined();
+  });
 });

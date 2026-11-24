@@ -13,6 +13,7 @@ import {
   extractDiagnosticSnippet,
 } from "../utils/cypress-diagnostics.js";
 import type { Logger } from "../utils/logger.js";
+import { normalizePath } from "../utils/paths.js";
 import type { SpecReport } from "./run-workspace.js";
 
 const ANSI_PATTERN = /\u001b\[[0-9;]*[A-Za-z]/g;
@@ -26,19 +27,24 @@ const CLOUD_RUN_PATH_PATTERN = /\/projects\/([^/\s]+)\/runs\/(\d+)/;
 /** Where a Mocha JSON report can start in mixed Cypress output. */
 const REPORT_START_PATTERN = /\{\s*"stats"\s*:/g;
 
+/** Specs named in a crash error; a crash early in a big glob loses many. */
+const MAX_LISTED_MISSING_SPECS = 10;
+
 export class OutputParser {
   constructor(private readonly logger: Logger) {}
 
   /**
    * Results of a run. `reports` are the per-spec files the reporter wrote to
    * the run folder; without them (an older run layout, a crash before any
-   * spec ran) the report is looked for in stdout.
+   * spec ran) the report is looked for in stdout. `specs` are the specs the
+   * run asked for, project relative, to name those that wrote no report.
    */
   parse(
     stdout: string,
     stderr: string,
     exitCode: number | null,
     reports: readonly SpecReport[] = [],
+    specs: readonly string[] = [],
   ): CypressRunResult {
     const cloud = extractCloudRun(`${stdout}\n${stderr}`);
 
@@ -52,7 +58,46 @@ export class OutputParser {
         : this.createErrorResult(stdout, stderr, exitCode);
     }
 
+    // Cypress exits with the number of failed tests. A non-zero code without
+    // a failure means it stopped partway (renderer crash, killed process):
+    // the reports it wrote all pass, but the specs after the crash are lost.
+    if (exitCode !== 0 && !result.error && result.failures.length === 0) {
+      result = this.crashResult(result, stdout, stderr, exitCode, reports, specs);
+    }
+
     return cloud ? { ...result, cloud } : result;
+  }
+
+  /** The tests that did report, with an error that says the run did not end. */
+  private crashResult(
+    result: CypressRunResult,
+    stdout: string,
+    stderr: string,
+    exitCode: number | null,
+    reports: readonly SpecReport[],
+    specs: readonly string[],
+  ): CypressRunResult {
+    const lines = [
+      `Cypress process exited with code ${exitCode ?? "unknown"} but no test failed: the run stopped before it ended.`,
+    ];
+    const missing = specsWithoutReport(specs, reports);
+    if (missing.length > 0) {
+      const listed = missing.slice(0, MAX_LISTED_MISSING_SPECS).join(", ");
+      const more =
+        missing.length > MAX_LISTED_MISSING_SPECS
+          ? `, and ${missing.length - MAX_LISTED_MISSING_SPECS} more`
+          : "";
+      lines.push(`No report from ${listed}${more}: their tests did not run or finish.`);
+    }
+    lines.push(`Output: ${extractDiagnosticSnippet(stdout, stderr)}`);
+
+    return {
+      ...result,
+      success: false,
+      error: lines.join("\n"),
+      stdoutTail: stdout.trim().slice(-2000) || undefined,
+      stderrTail: stderr.trim().slice(-2000) || undefined,
+    };
   }
 
   /**
@@ -312,6 +357,24 @@ export function extractCloudRun(output: string): CloudRunInfo | undefined {
     projectId: pathMatch?.[1],
     runNumber: Number.isFinite(runNumber) ? runNumber : undefined,
   };
+}
+
+/**
+ * Requested specs that wrote no report. Empty when that cannot be told: the
+ * report came from stdout, or a report has no spec path to match.
+ */
+function specsWithoutReport(
+  specs: readonly string[],
+  reports: readonly SpecReport[],
+): string[] {
+  if (reports.length === 0 || reports.some((report) => !report.spec)) {
+    return [];
+  }
+  // Cypress gives the spec's path relative to the project, with the platform's
+  // separator; the requested specs use forward slashes.
+  const key = (spec: string): string => normalizePath(spec).replace(/^\.\//, "");
+  const reported = new Set(reports.map((report) => key(report.spec!)));
+  return specs.filter((spec) => !reported.has(key(spec)));
 }
 
 function inferState(
