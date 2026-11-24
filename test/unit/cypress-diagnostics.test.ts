@@ -4,6 +4,7 @@ import {
   classifyConfigRuntimeCheck,
   extractCompileError,
   extractDiagnosticSnippet,
+  missingBinaryDir,
 } from "../../src/utils/cypress-diagnostics.js";
 
 // Output of Cypress 16.3 for a spec importing a missing file, local paths replaced.
@@ -50,6 +51,31 @@ describe("cypress diagnostics", () => {
 
     expect(result.status).toBe("fail");
     expect(result.detail).toContain("Your configFile is invalid");
+  });
+
+  it("should fail with the install command when the binary is not installed", () => {
+    const stderr = [
+      "No version of Cypress is installed in: /home/dev/.cache/Cypress/16.3.0/Cypress",
+      "",
+      "Please reinstall Cypress by running: cypress install",
+      "",
+      "----------",
+      "",
+      "Cypress executable not found at: /home/dev/.cache/Cypress/16.3.0/Cypress/Cypress",
+      "",
+      "----------",
+      "",
+      "Platform: linux-x64 (Ubuntu - 24.04)",
+      "Cypress Version: 16.3.0",
+    ].join("\n");
+
+    expect(missingBinaryDir(stderr)).toBe("/home/dev/.cache/Cypress/16.3.0/Cypress");
+    expect(missingBinaryDir("Your configFile is invalid")).toBeUndefined();
+    expect(classifyConfigRuntimeCheck(1, "", stderr)).toEqual({
+      status: "fail",
+      detail:
+        "Cypress 16.3.0 binary not installed in /home/dev/.cache/Cypress/16.3.0/Cypress. Run: npx cypress install. MCP clients may not pass CYPRESS_CACHE_FOLDER to the server, so set it in the client's env for this server if the binary lives elsewhere.",
+    });
   });
 
   it("should extract the cause of a spec that does not compile", () => {

@@ -2,6 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import path from "node:path";
 import type { CypressRunResult, FailureDetail } from "../types/results.js";
+import {
+  CACHE_FOLDER_NOTE,
+  INSTALL_BINARY,
+  missingBinaryDir,
+} from "./cypress-diagnostics.js";
 
 export function enrichRunResult(
   result: CypressRunResult,
@@ -115,6 +120,10 @@ export function crashNextActions(result: CypressRunResult): string[] | undefined
       "Fix the test named in data.runningTest, or raise timeout, then cypress_rerun_last",
       "cypress_get_last_run",
     ];
+  }
+
+  if (result.error && missingBinaryDir(result.error)) {
+    return [`${INSTALL_BINARY}, then cypress_rerun_last`, CACHE_FOLDER_NOTE];
   }
 
   return undefined;

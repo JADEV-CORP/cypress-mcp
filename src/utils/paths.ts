@@ -1,5 +1,6 @@
 // Copyright (c) 2026 JADEV GROUP SARL
 // SPDX-License-Identifier: Apache-2.0
+import os from "node:os";
 import path from "node:path";
 import { realpathSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -110,6 +111,45 @@ export function resolveCypressInstall(projectRoot: string): CypressInstall | nul
   } catch {
     return null;
   }
+}
+
+/**
+ * Folder of the Cypress binary for a package version, where the Cypress CLI
+ * looks for it: under CYPRESS_CACHE_FOLDER (relative to where Cypress runs,
+ * `~` expanded), else under the platform cache that its `cachedir`
+ * dependency picks. `npm install cypress` downloads the binary there, outside
+ * the project, so a project can have the package without the binary.
+ */
+export function cypressBinaryDir(
+  version: string,
+  options: {
+    /** Where Cypress runs: the project root */
+    readonly cwd: string;
+    readonly env?: NodeJS.ProcessEnv;
+    readonly platform?: NodeJS.Platform;
+    readonly home?: string;
+  },
+): string {
+  const {
+    cwd,
+    env = process.env,
+    platform = process.platform,
+    home = os.homedir(),
+  } = options;
+  const p = platform === "win32" ? path.win32 : path.posix;
+  const custom = env["CYPRESS_CACHE_FOLDER"]?.trim();
+  const cache = custom
+    ? p.resolve(cwd, custom.replace(/^~(?=$|[\\/])/, home))
+    : platform === "darwin"
+      ? p.join(home, "Library", "Caches", "Cypress")
+      : platform === "win32"
+        ? p.join(
+            env["LOCALAPPDATA"] || p.join(home, "AppData", "Local"),
+            "Cypress",
+            "Cache",
+          )
+        : p.join(env["XDG_CACHE_HOME"] || p.join(home, ".cache"), "Cypress");
+  return p.join(cache, version, platform === "darwin" ? "Cypress.app" : "Cypress");
 }
 
 /** True when `version` (x.y.z) is at least `major.minor`. */

@@ -136,6 +136,18 @@ describe("cypress-mcp run", () => {
     expect(missing.stderr).not.toMatch(/cypress_\w+/);
   });
 
+  it("sends a run without the Cypress binary to cypress install", () => {
+    const { status, stdout } = cli(["run", "cypress/e2e/pass.cy.js"], root, {
+      FAKE_NO_BINARY: "1",
+    });
+
+    expect(status).toBe(1);
+    expect(stdout).toContain("No version of Cypress is installed in:");
+    expect(stdout.trim().split("\n").at(-1)).toBe(
+      "next: npx cypress install, then run again",
+    );
+  });
+
   it("adds source excerpts and stacks to the failures in --json", () => {
     const { stdout } = cli(["run", "cypress/e2e/checkout.cy.js", "--json"]);
     const envelope = JSON.parse(stdout) as {
@@ -197,6 +209,40 @@ describe("cypress-mcp doctor", () => {
     };
     expect(envelope.tool).toBe("cypress_doctor");
     expect(envelope.data).toMatchObject({ healthy: true, launched: false });
+  });
+
+  it("checks the Cypress binary in the cache, or CYPRESS_RUN_BINARY, in --quick", () => {
+    const binary = process.platform === "darwin" ? "Cypress.app" : "Cypress";
+    expect(cli(["doctor", "--quick"]).stdout).toContain(
+      `ok   Cypress binary: 16.3.0 in ${path.join(cache, "16.3.0", binary)}\n`,
+    );
+
+    // The npm package alone is not enough: Cypress runs the binary it downloads.
+    const empty = fs.mkdtempSync(path.join(os.tmpdir(), "cypress-mcp-cache-"));
+    try {
+      const missing = cli(["doctor", "--quick"], root, { CYPRESS_CACHE_FOLDER: empty });
+      expect(missing.status).toBe(1);
+      expect(missing.stdout).toContain(
+        `fail Cypress binary: Cypress 16.3.0 binary not installed in ${path.join(empty, "16.3.0", binary)}. Run: npx cypress install. MCP clients may not pass CYPRESS_CACHE_FOLDER to the server, so set it in the client's env for this server if the binary lives elsewhere.\n`,
+      );
+      expect(missing.stdout).toContain("ok   Cypress package: ");
+
+      const nowhere = path.join(root, "nowhere", "Cypress");
+      const runBinary = cli(["doctor", "--quick"], root, { CYPRESS_RUN_BINARY: nowhere });
+      expect(runBinary.status).toBe(1);
+      expect(runBinary.stdout).toContain(
+        `fail Cypress binary: CYPRESS_RUN_BINARY points at ${nowhere}, which does not exist`,
+      );
+      const elsewhere = path.join(root, "package.json");
+      const ok = cli(["doctor", "--quick"], root, {
+        CYPRESS_CACHE_FOLDER: empty,
+        CYPRESS_RUN_BINARY: elsewhere,
+      });
+      expect(ok.status).toBe(0);
+      expect(ok.stdout).toContain(`ok   Cypress binary: CYPRESS_RUN_BINARY ${elsewhere}`);
+    } finally {
+      fs.rmSync(empty, { recursive: true, force: true });
+    }
   });
 
   it("exits 2 on bad arguments", () => {

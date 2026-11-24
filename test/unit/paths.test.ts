@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   isBroadRoot,
+  cypressBinaryDir,
   isVersionAtLeast,
   parseCwdArg,
   resolveCypressInstall,
@@ -146,5 +147,41 @@ describe("isBroadRoot", () => {
     expect(isBroadRoot(path.join(home, "dev"), home)).toBe(false);
     expect(isBroadRoot(path.join(home, "dev", "shop"), home)).toBe(false);
     expect(isBroadRoot(path.join(tmp, "users", "other"), home)).toBe(false);
+  });
+});
+
+describe("cypressBinaryDir", () => {
+  const at = (
+    platform: NodeJS.Platform,
+    env: NodeJS.ProcessEnv = {},
+    home = "/home/dev",
+  ): string => cypressBinaryDir("16.3.0", { cwd: "/work/shop", env, platform, home });
+
+  it("looks in the platform cache, as the Cypress CLI does", () => {
+    expect(at("darwin", {}, "/Users/dev")).toBe(
+      "/Users/dev/Library/Caches/Cypress/16.3.0/Cypress.app",
+    );
+    expect(at("linux")).toBe("/home/dev/.cache/Cypress/16.3.0/Cypress");
+    expect(at("linux", { XDG_CACHE_HOME: "/var/cache" })).toBe(
+      "/var/cache/Cypress/16.3.0/Cypress",
+    );
+    expect(
+      at("win32", { LOCALAPPDATA: "C:\\Users\\dev\\AppData\\Local" }, "C:\\Users\\dev"),
+    ).toBe("C:\\Users\\dev\\AppData\\Local\\Cypress\\Cache\\16.3.0\\Cypress");
+    expect(at("win32", {}, "C:\\Users\\dev")).toBe(
+      "C:\\Users\\dev\\AppData\\Local\\Cypress\\Cache\\16.3.0\\Cypress",
+    );
+  });
+
+  it("uses CYPRESS_CACHE_FOLDER, with ~ and paths relative to the project", () => {
+    expect(at("darwin", { CYPRESS_CACHE_FOLDER: "/ci/cypress" })).toBe(
+      "/ci/cypress/16.3.0/Cypress.app",
+    );
+    expect(at("linux", { CYPRESS_CACHE_FOLDER: "~/cy" })).toBe(
+      "/home/dev/cy/16.3.0/Cypress",
+    );
+    expect(at("linux", { CYPRESS_CACHE_FOLDER: ".cache/cy" })).toBe(
+      "/work/shop/.cache/cy/16.3.0/Cypress",
+    );
   });
 });

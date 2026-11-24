@@ -22,6 +22,29 @@ if (process.env.FAKE_CYPRESS_LOG) {
   fs.appendFileSync(process.env.FAKE_CYPRESS_LOG, `${JSON.stringify(args)}\n`);
 }
 
+if (process.env.FAKE_NO_BINARY) {
+  // What the Cypress CLI prints, before any command, when the binary of its
+  // version is not in the cache.
+  const dir = path.join(process.env.CYPRESS_CACHE_FOLDER || "/home/dev/.cache/Cypress", "16.3.0", "Cypress");
+  console.error(
+    [
+      `No version of Cypress is installed in: ${dir}`,
+      "",
+      "Please reinstall Cypress by running: cypress install",
+      "",
+      "----------",
+      "",
+      `Cypress executable not found at: ${path.join(dir, "Cypress")}`,
+      "",
+      "----------",
+      "",
+      "Platform: linux-x64 (Ubuntu - 24.04)",
+      "Cypress Version: 16.3.0",
+    ].join("\n"),
+  );
+  process.exit(1);
+}
+
 if (args[0] === "info") {
   process.stdout.write(
     [

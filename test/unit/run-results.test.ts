@@ -62,6 +62,17 @@ describe("run-results helpers", () => {
     expect(nextActions).toEqual(["cypress_get_last_run", "cypress_doctor"]);
   });
 
+  it("should send a run without the Cypress binary to cypress install", () => {
+    const nextActions = buildRunNextActions({
+      ...baseResult,
+      error:
+        "Cypress process exited with code 1. Output: No version of Cypress is installed in: /home/dev/.cache/Cypress/16.3.0/Cypress",
+    });
+
+    expect(nextActions[0]).toBe("npx cypress install, then cypress_rerun_last");
+    expect(nextActions.join(" ")).not.toContain("cypress_doctor");
+  });
+
   it("should mention flaky tests in the summary", () => {
     const summary = buildRunSummary(
       {

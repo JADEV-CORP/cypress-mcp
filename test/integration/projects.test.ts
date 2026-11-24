@@ -269,3 +269,25 @@ describe("a cypress-mcp.config.json with a typo", () => {
     expect(doctor.text).toContain("ok   Failure context: On");
   });
 });
+
+describe("a Cypress package without its binary", () => {
+  it("sends the agent to cypress install, not to the doctor", async () => {
+    const root = tempRoot();
+    project(root);
+    const client = await connect(root, { FAKE_NO_BINARY: "1" });
+
+    const run = await call(client, "cypress_run", { spec: "cypress/e2e/pass.cy.js" });
+    expect(run.isError).toBe(true);
+    expect(run.text).toContain(
+      "next: npx cypress install, then run again (MCP clients may not pass CYPRESS_CACHE_FOLDER to the server, so set it in the client's env for this server if the binary lives elsewhere)",
+    );
+    expect(run.text).not.toContain("cypress_doctor");
+
+    // Started, Cypress says the same: a fail, not a warning on a healthy setup.
+    const doctor = await call(client, "cypress_doctor");
+    expect(doctor.data["healthy"]).toBe(false);
+    expect(doctor.text).toContain(
+      "fail Config runtime: Cypress 16.3.0 binary not installed in",
+    );
+  });
+});

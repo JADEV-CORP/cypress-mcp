@@ -78,9 +78,14 @@ try {
   });
 
   await check("doctor finds Cypress and loads the config", async () => {
+    // Quick: the binary is found in the cache without starting Cypress.
+    const quick = await call("cypress_doctor", { quick: true });
+    const binary = quick.data.checks.find((c) => c.check === "Cypress binary");
+    assert.equal(binary?.status, "ok", quick.text);
+
     const doctor = await call("cypress_doctor");
-    const binary = doctor.data.checks.find((c) => /binary/i.test(c.check));
-    assert.equal(binary?.status, "ok", doctor.text);
+    const pkg = doctor.data.checks.find((c) => c.check === "Cypress package");
+    assert.equal(pkg?.status, "ok", doctor.text);
     const runtime = doctor.data.checks.find((c) => c.check === "Config runtime");
     assert.equal(runtime?.status, "ok", doctor.text);
     // The config also loads through the wrapper that records failure context.

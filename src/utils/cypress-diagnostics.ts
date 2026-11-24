@@ -11,6 +11,35 @@ const MISSING_SPEC_PATTERN =
 
 const ANSI_PATTERN = /\u001b\[[0-9;]*[A-Za-z]/g;
 
+/**
+ * What the Cypress CLI prints, before any command, when the npm package is
+ * installed but the binary of its version is not in the cache.
+ */
+const MISSING_BINARY_PATTERN = /No version of Cypress is installed in:?\s*(\S.*)$/m;
+const CYPRESS_VERSION_PATTERN = /^Cypress Version:\s*(\S+)/m;
+
+/** The step that installs the binary for the project's Cypress version. */
+export const INSTALL_BINARY = "npx cypress install";
+
+/**
+ * MCP clients start the server with an environment of their own, which may
+ * lack the CYPRESS_CACHE_FOLDER of the user's shell: Cypress then looks in
+ * the default cache, and installing again from the shell does not help.
+ */
+export const CACHE_FOLDER_NOTE =
+  "MCP clients may not pass CYPRESS_CACHE_FOLDER to the server, so set it in the client's env for this server if the binary lives elsewhere";
+
+/** The folder Cypress looked for its binary in, when the output says it is missing. */
+export function missingBinaryDir(output: string): string | undefined {
+  return MISSING_BINARY_PATTERN.exec(output.replace(ANSI_PATTERN, ""))?.[1]?.trim();
+}
+
+/** The doctor's line for a missing binary. */
+export function binaryNotInstalled(dir: string, version: string | undefined): string {
+  const cypress = version ? `Cypress ${version}` : "Cypress";
+  return `${cypress} binary not installed in ${dir}. Run: ${INSTALL_BINARY}. ${CACHE_FOLDER_NOTE}.`;
+}
+
 /** Cypress prints this when the preprocessor cannot bundle a spec. */
 const COMPILE_ERROR_HEADER = "Oops...we found an error preparing this test file:";
 
@@ -80,6 +109,14 @@ export function classifyConfigRuntimeCheck(
   stderr: string,
 ): RuntimeCheckResult {
   const combined = `${stderr}\n${stdout}`;
+
+  const binaryDir = missingBinaryDir(combined);
+  if (binaryDir) {
+    return {
+      status: "fail",
+      detail: binaryNotInstalled(binaryDir, CYPRESS_VERSION_PATTERN.exec(combined)?.[1]),
+    };
+  }
 
   if (CONFIG_INVALID_PATTERN.test(combined)) {
     return {

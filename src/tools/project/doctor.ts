@@ -5,8 +5,11 @@ import path from "node:path";
 import { z } from "zod";
 import type { CallToolResult, McpServer } from "@modelcontextprotocol/server";
 import type { ToolContext } from "../../types/index.js";
-import { classifyConfigRuntimeCheck } from "../../utils/cypress-diagnostics.js";
-import { normalizePath } from "../../utils/paths.js";
+import {
+  binaryNotInstalled,
+  classifyConfigRuntimeCheck,
+} from "../../utils/cypress-diagnostics.js";
+import { cypressBinaryDir, normalizePath } from "../../utils/paths.js";
 import { finish } from "../../format/compact.js";
 import { ProjectRequiredError } from "../../services/projects.js";
 import { prepareWorkspace } from "../../services/run-workspace.js";
@@ -168,16 +171,23 @@ async function runChecks(ctx: ToolContext, launch: boolean): Promise<Check[]> {
     const binary = await ctx.processManager.resolveBinary();
     binaryFound = true;
     checks.push({
-      check: "Cypress binary",
+      check: "Cypress package",
       status: "ok",
       detail: normalizePath(path.relative(config.projectRoot, binary)),
     });
   } catch {
     checks.push({
-      check: "Cypress binary",
+      check: "Cypress package",
       status: "fail",
       detail: "Not found. Run: npm install --save-dev cypress",
     });
+  }
+
+  // Started, Cypress reports a missing binary itself (Config runtime).
+  if (!launch && binaryFound) {
+    checks.push(
+      await binaryCheck(config.projectRoot, await ctx.processManager.cypressVersion()),
+    );
   }
 
   if (!launch) {
@@ -193,7 +203,7 @@ async function runChecks(ctx: ToolContext, launch: boolean): Promise<Check[]> {
     checks.push({
       check: "Config runtime",
       status: "warn",
-      detail: "Skipped because the Cypress binary was not found.",
+      detail: "Skipped because the Cypress package was not found.",
     });
   }
 
@@ -317,6 +327,38 @@ async function runtimeChecks(
     ];
   }
   return [plain.check];
+}
+
+/**
+ * The binary the Cypress CLI starts, found the way the CLI finds it:
+ * CYPRESS_RUN_BINARY, else the cache folder of the package's version.
+ */
+async function binaryCheck(projectRoot: string, version: string): Promise<Check> {
+  const check = "Cypress binary";
+  const runBinary = process.env["CYPRESS_RUN_BINARY"]?.trim();
+  if (runBinary) {
+    const file = path.resolve(projectRoot, runBinary);
+    return (await exists(file))
+      ? { check, status: "ok", detail: `CYPRESS_RUN_BINARY ${file}` }
+      : {
+          check,
+          status: "fail",
+          detail: `CYPRESS_RUN_BINARY points at ${file}, which does not exist`,
+        };
+  }
+  const dir = cypressBinaryDir(version, { cwd: projectRoot });
+  return (await exists(dir))
+    ? { check, status: "ok", detail: `${version} in ${dir}` }
+    : { check, status: "fail", detail: binaryNotInstalled(dir, version) };
+}
+
+async function exists(file: string): Promise<boolean> {
+  try {
+    await fs.access(file);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function supportFileCheck(

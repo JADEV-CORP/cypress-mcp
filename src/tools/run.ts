@@ -17,6 +17,11 @@ import {
 } from "./run-shared.js";
 import { screenshotLinks } from "./screenshots.js";
 import { displayPath } from "../services/projects.js";
+import {
+  CACHE_FOLDER_NOTE,
+  INSTALL_BINARY,
+  missingBinaryDir,
+} from "../utils/cypress-diagnostics.js";
 import type { PageContext } from "../types/results.js";
 import { RUNS_CYPRESS, envelopeSchema, errorResult, textResult } from "./result.js";
 
@@ -359,6 +364,14 @@ export function runNextActions(
     case "error":
       if (result.errorKind === "compile") {
         actions.push("fix the error in the spec or a file it imports, then run again");
+      } else if (result.error && missingBinaryDir(result.error)) {
+        // The doctor would only find the same; installing is the fix. The CLI
+        // runs with the shell's own env, so the note is for MCP only.
+        actions.push(
+          cli
+            ? `${INSTALL_BINARY}, then run again`
+            : `${INSTALL_BINARY}, then run again (${CACHE_FOLDER_NOTE})`,
+        );
       } else if (cli) {
         actions.push(
           "cypress-mcp doctor if the output above does not explain it (launches Cypress, about 15 s)",
