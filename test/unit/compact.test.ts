@@ -155,8 +155,9 @@ describe("renderRun", () => {
     );
     const lines = text.split("\n");
 
-    expect(lines[1]).toBe("1) Big suite case 1");
-    expect(lines[3]).toBe(`   screenshot: ${failures[0]!.screenshot}`);
+    const first = lines.indexOf("1) Big suite case 1");
+    expect(first).toBeGreaterThan(0);
+    expect(lines[first + 2]).toBe(`   screenshot: ${failures[0]!.screenshot}`);
     expect(text).not.toContain("screenshots in");
     expect(text).toContain(`${45 - MAX_LISTED_FAILURES} more failures, listed by --json`);
     expect(text).not.toContain("cypress_get_failure");

@@ -256,7 +256,8 @@ describe("a cypress-mcp.config.json with a typo", () => {
       path.join(root, "cypress-mcp.config.json"),
       '{ "failureContext": false, }\n',
     );
-    const client = await connect(root);
+    // An existing binary, so the quick binary check passes on any machine.
+    const client = await connect(root, { CYPRESS_RUN_BINARY: process.execPath });
 
     const doctor = await call(client, "cypress_doctor", { quick: true });
     expect(doctor.text.split("\n")[0]).toBe(
