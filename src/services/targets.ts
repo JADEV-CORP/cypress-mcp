@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // What a run should run, from the `spec` argument: one spec, several, a glob
-// such as cypress/e2e/**/*.cy.ts, or `file:line` to run the test (or the
-// describe block) at that line. Everything runs in one Cypress launch.
+// such as cypress/e2e/**/*.cy.ts, `file:line` to run the test (or the
+// describe block) at that line, or nothing for every spec. Everything runs in
+// one Cypress launch.
 import { existsSync } from "node:fs";
 import path from "node:path";
 import type { ToolContext } from "../types/index.js";
@@ -135,6 +136,25 @@ export async function resolveTargets(
     ...(lineTargets > 0 ? { byLine: true } : {}),
     ...(notes.length > 0 ? { notes } : {}),
   };
+}
+
+/**
+ * Every spec of the project, for a run without `spec`, in one launch. The
+ * specPattern goes to Cypress as written, like a glob, which keeps the
+ * command line short for big suites.
+ */
+export async function allSpecTargets(ctx: ToolContext): Promise<RunTargets> {
+  const { specPattern } = await ctx.configLoader.load();
+  const specs = await ctx.specFinder.findSpecs(specPattern);
+  if (specs.length === 0) {
+    throw new SpecNotFoundError(specPattern.join(", "));
+  }
+  if (specs.length > MAX_SPECS) {
+    throw new InvalidArgumentError(
+      `${specs.length} specs match the project's specPattern, more than ${MAX_SPECS} in one run. Pass spec to run part of them.`,
+    );
+  }
+  return { specs, cypressSpec: specPattern.join(",") };
 }
 
 /**

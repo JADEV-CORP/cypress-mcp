@@ -26,15 +26,15 @@ import { createLogger } from "./utils/logger.js";
 export const CLI_USAGE = `Usage: cypress-mcp <command> [options]
 
 Commands:
-  run <spec>...       run specs in one Cypress launch, print each failure
+  run [<spec>...]     run specs in one Cypress launch, print each failure
   doctor              check the Cypress setup
   list                list the specs and their test counts
 
-cypress-mcp run <spec>... [options]
-Runs Cypress once for the given specs and prints per failure the file:line,
-the error, the screenshot and what the page showed. A spec can be a path,
-path:line for the test at that line, or a glob in quotes. Passing tests are
-omitted unless --verbose.
+cypress-mcp run [<spec>...] [options]
+Runs Cypress once for the given specs, or for every spec when none is given,
+and prints per failure the file:line, the error, the screenshot and what the
+page showed. A spec can be a path, path:line for the test at that line, or a
+glob in quotes. Passing tests are omitted unless --verbose.
   --test <name>       run only tests whose full title contains <name>
   --repeat <n>        run the selected tests n times (1 to 50), to prove a flaky fix
   --component         component tests (cypress run --component)
@@ -72,7 +72,7 @@ starts it and talks to it over stdin. To add it to a client, see
 https://github.com/jams4code/cypress-mcp#setup
 
 From a terminal, use a command:
-  cypress-mcp run <spec>...   run specs and print each failure
+  cypress-mcp run [<spec>...] run specs (default: all) and print each failure
   cypress-mcp doctor          check the Cypress setup
   cypress-mcp list            list the specs
   cypress-mcp --help          every option`;
@@ -162,11 +162,6 @@ async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
     io.out(CLI_USAGE);
     return EXIT_PASSED;
   }
-  if (positionals.length === 0) {
-    io.err(`Expected at least one spec.\n\n${CLI_USAGE}`);
-    return EXIT_USAGE;
-  }
-
   const repeat = values.repeat === undefined ? undefined : Number(values.repeat);
   if (repeat !== undefined && (!Number.isInteger(repeat) || repeat < 1 || repeat > 50)) {
     io.err(`--repeat must be a whole number from 1 to 50: ${values.repeat}`);
@@ -215,7 +210,8 @@ async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
 
   try {
     const run = await prepareRun(ctx, {
-      spec: specs,
+      // No spec: every spec of the project.
+      spec: specs.length > 0 ? specs : undefined,
       testName: values.test,
       repeat,
       component: values.component,

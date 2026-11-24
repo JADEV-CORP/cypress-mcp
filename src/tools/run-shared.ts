@@ -6,7 +6,7 @@ import type { ToolContext } from "../types/index.js";
 import type { CloudRecordArgs, CypressRunArgs } from "../types/cypress.js";
 import type { RunProgress } from "../services/reporter-events.js";
 import { InvalidArgumentError } from "../utils/errors.js";
-import { resolveTargets } from "../services/targets.js";
+import { allSpecTargets, resolveTargets } from "../services/targets.js";
 import { displayPath } from "../services/projects.js";
 
 // Descriptions and constraints are kept short: every tool definition is sent
@@ -94,8 +94,8 @@ function validateRunInput(input: RunInput): void {
 }
 
 export interface RunInput {
-  /** A spec path, `path:line`, a glob, or several of those */
-  spec: string | string[];
+  /** A spec path, `path:line`, a glob, or several of those; none for every spec */
+  spec?: string | string[];
   testName?: string;
   /** Project folder under the server root (monorepos) */
   project?: string;
@@ -153,7 +153,16 @@ export async function prepareRun(
   input: RunInput,
 ): Promise<PreparedRun> {
   validateRunInput(input);
-  const inputs = Array.isArray(input.spec) ? input.spec : [input.spec];
+  const inputs =
+    input.spec === undefined ? [] : Array.isArray(input.spec) ? input.spec : [input.spec];
+  if (inputs.length === 0 && input.component) {
+    // The specPattern read from the Cypress config is the e2e one.
+    throw new InvalidArgumentError(
+      "component needs spec, such as a glob like src/**/*.cy.tsx: without spec, every e2e spec runs.",
+    );
+  }
+  // Without a spec, a monorepo root with several projects throws
+  // ProjectRequiredError, which names them.
   const {
     ctx,
     prefix,
@@ -162,9 +171,10 @@ export async function prepareRun(
     project: input.project,
     specs: inputs,
   });
-  const targets = await resolveTargets(ctx, projectSpecs, (spec) =>
-    displayPath(prefix, spec),
-  );
+  const targets =
+    inputs.length === 0
+      ? await allSpecTargets(ctx)
+      : await resolveTargets(ctx, projectSpecs, (spec) => displayPath(prefix, spec));
   if (targets.byLine && input.testName !== undefined) {
     throw new InvalidArgumentError(
       "Use either testName or a file:line target, not both: file:line already picks the test.",

@@ -132,11 +132,13 @@ export function register(server: McpServer, ctx: ToolContext): void {
       title: "Run Cypress specs",
       description:
         "Run Cypress headless in one launch: a spec, path:line, a glob or a list. Returns per failure file:line, error, screenshot and the page at the failure (URL, console and network errors, similar selectors), plus a runId.",
-      inputSchema: z.object({
+      // Strict: a misspelled spec (specFile, specs) must not run every spec.
+      inputSchema: z.strictObject({
         spec: z
           .union([z.string().min(1), z.array(z.string().min(1)).min(1).max(100)])
+          .optional()
           .describe(
-            'Spec path, "path:line" for the test at that line, a glob such as cypress/e2e/**/*.cy.ts, or a list',
+            'Spec path, "path:line" for the test at that line, a glob such as cypress/e2e/**/*.cy.ts, or a list. Omit for every spec',
           ),
         testName: z
           .string()

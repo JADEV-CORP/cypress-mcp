@@ -164,7 +164,11 @@ const PAGES = {
   },
 };
 
-const specs = specArg.split(",").filter(Boolean);
+// Like Cypress, a glob in --spec runs every spec it matches in the project.
+const specs = specArg
+  .split(",")
+  .filter(Boolean)
+  .flatMap((spec) => (/[*?]/.test(spec) ? fs.globSync(spec).sort() : [spec]));
 
 for (const [index, spec] of specs.entries()) {
   const name = path.basename(spec);

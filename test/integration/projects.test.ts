@@ -291,3 +291,52 @@ describe("a Cypress package without its binary", () => {
     );
   });
 });
+
+describe("a run without spec", () => {
+  it("runs every spec of the project in one launch", async () => {
+    const root = tempRoot();
+    project(root);
+    for (const spec of ["broken", "checkout", "hang", "support"]) {
+      fs.rmSync(path.join(root, "cypress", "e2e", `${spec}.cy.js`));
+    }
+    const log = path.join(root, "argv.log");
+    const client = await connect(root, { FAKE_CYPRESS_LOG: log });
+
+    const all = await call(client, "cypress_run");
+    expect(all.isError).toBe(false);
+    expect(all.text).toMatch(/^PASS 2 specs: 2 passed, 1 flaky in /);
+    expect(all.data["specs"]).toEqual([
+      "cypress/e2e/flaky.cy.js",
+      "cypress/e2e/pass.cy.js",
+    ]);
+    // The project's specPattern goes to Cypress as written: one launch, a short command line.
+    const [args] = runArgs(log);
+    expect(args![args!.indexOf("--spec") + 1]).toBe("cypress/e2e/**/*.cy.js");
+
+    // The specPattern read from the config is the e2e one.
+    const component = await call(client, "cypress_run", { component: true });
+    expect(component.isError).toBe(true);
+    expect(component.data["code"]).toBe("INVALID_ARGUMENT");
+    expect(runArgs(log)).toHaveLength(1);
+
+    for (const spec of ["flaky", "pass"]) {
+      fs.rmSync(path.join(root, "cypress", "e2e", `${spec}.cy.js`));
+    }
+    const none = await call(client, "cypress_run");
+    expect(none.isError).toBe(true);
+    expect(none.data["code"]).toBe("SPEC_NOT_FOUND");
+    expect(none.text).toContain("cypress/e2e/**/*.cy.js");
+  });
+
+  it("names the projects of a monorepo root instead of guessing", async () => {
+    const root = tempRoot();
+    project(path.join(root, "apps", "shop"));
+    project(path.join(root, "apps", "admin"));
+    const client = await connect(root);
+
+    const run = await call(client, "cypress_run");
+    expect(run.isError).toBe(true);
+    expect(run.data["code"]).toBe("PROJECT_REQUIRED");
+    expect(run.text).toContain("several Cypress projects: apps/admin, apps/shop");
+  });
+});

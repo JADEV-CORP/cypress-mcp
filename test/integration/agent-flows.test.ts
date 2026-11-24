@@ -684,11 +684,14 @@ describe("errors", () => {
   });
 
   it("rejects arguments that do not match the input schema with isError", async () => {
+    const before = runs().length;
     const result = await client.callTool({
       name: "cypress_run",
       arguments: { specFile: "cypress/e2e/pass.cy.js" },
     });
     expect(result.isError).toBe(true);
+    // Without spec cypress_run runs every spec, so a misspelled one must not start a run.
+    expect(runs()).toHaveLength(before);
   });
 });
 

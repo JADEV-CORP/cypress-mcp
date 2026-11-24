@@ -90,6 +90,22 @@ describe("cypress-mcp run", () => {
     expect(cli(["run", "cypress/e2e/pass.cy.js", "--repeat", "99"]).status).toBe(2);
   });
 
+  it("runs every spec without a spec argument", () => {
+    const suite = fs.mkdtempSync(path.join(os.tmpdir(), "cypress-mcp-cli-all-"));
+    try {
+      fs.cpSync(root, suite, { recursive: true });
+      for (const spec of ["broken", "checkout", "hang", "support"]) {
+        fs.rmSync(path.join(suite, "cypress", "e2e", `${spec}.cy.js`));
+      }
+
+      const all = cli(["run"], suite);
+      expect(all.status).toBe(0);
+      expect(all.stdout).toMatch(/^PASS 2 specs: 2 passed, 1 flaky in /);
+    } finally {
+      fs.rmSync(suite, { recursive: true, force: true });
+    }
+  });
+
   it("prints the envelope with --json", () => {
     const { status, stdout } = cli(["run", "cypress/e2e/checkout.cy.js", "--json"]);
     const envelope = JSON.parse(stdout) as { tool: string; data: { status: string } };
@@ -104,7 +120,6 @@ describe("cypress-mcp run", () => {
     expect(missing.status).toBe(2);
     expect(missing.stderr).toContain("Error SPEC_NOT_FOUND");
 
-    expect(cli(["run"]).status).toBe(2);
     expect(cli(["run", "a.cy.js", "--nope"]).status).toBe(2);
     expect(cli(["run", "cypress/e2e/pass.cy.js", "--timeout", "soon"]).status).toBe(2);
   });
@@ -164,6 +179,7 @@ describe("cypress-mcp run", () => {
     const help = cli(["--help"]);
     expect(help.status).toBe(0);
     expect(help.stdout).toContain("Usage: cypress-mcp <command> [options]");
+    expect(help.stdout).toContain("cypress-mcp run [<spec>...] [options]");
     expect(help.stdout).toContain("cypress-mcp doctor [--quick]");
     expect(help.stdout).toContain("cypress-mcp list [--titles]");
 
