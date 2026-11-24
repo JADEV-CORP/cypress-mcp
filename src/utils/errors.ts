@@ -27,7 +27,7 @@ export class CypressMcpError extends Error {
 export class CypressNotFoundError extends CypressMcpError {
   constructor(projectRoot: string) {
     super(
-      `Cypress binary not found in ${projectRoot}`,
+      `Cypress package not found in ${projectRoot}`,
       "CYPRESS_NOT_FOUND",
       "Install Cypress in the project with 'npm install --save-dev cypress', then run cypress_doctor.",
     );

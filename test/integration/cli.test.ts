@@ -120,6 +120,19 @@ describe("cypress-mcp run", () => {
     expect(missing.status).toBe(2);
     expect(missing.stderr).toContain("Error SPEC_NOT_FOUND");
 
+    // A project without the cypress package: the npm package, not the binary, is missing.
+    const bare = fs.mkdtempSync(path.join(os.tmpdir(), "cypress-mcp-bare-"));
+    try {
+      fs.cpSync(PROJECT_FIXTURE, bare, { recursive: true });
+      const noPackage = cli(["run", "cypress/e2e/pass.cy.js"], bare);
+      expect(noPackage.status).toBe(2);
+      expect(noPackage.stderr).toContain(
+        "Error CYPRESS_NOT_FOUND: Cypress package not found",
+      );
+    } finally {
+      fs.rmSync(bare, { recursive: true, force: true });
+    }
+
     expect(cli(["run", "a.cy.js", "--nope"]).status).toBe(2);
     expect(cli(["run", "cypress/e2e/pass.cy.js", "--timeout", "soon"]).status).toBe(2);
   });
