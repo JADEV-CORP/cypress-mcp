@@ -85,6 +85,30 @@ export async function executeLegacyRun(
     );
   }
 
+  // Not a pass either: nothing was tested. Kept an error as NO_TEST_MATCHED was.
+  if (outcome.type === "skipped") {
+    const query = args.grep ?? "";
+    return legacyResult(
+      {
+        ok: false,
+        tool,
+        runId: record.runId,
+        summary: `The tests matching "${query}" in ${spec} are skipped (it.skip or this.skip()): nothing was tested.`,
+        ...previous,
+        data: {
+          code: "TEST_SKIPPED",
+          testName: query,
+          skipped: outcome.skipped,
+          stats: result.stats,
+        },
+        nextActions: [
+          "remove .skip (or the this.skip() call) from the test, then run again",
+        ],
+      },
+      true,
+    );
+  }
+
   if (outcome.type === "timeout") {
     return legacyResult(
       {

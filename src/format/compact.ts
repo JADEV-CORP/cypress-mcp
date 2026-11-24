@@ -33,11 +33,13 @@ const MAX_ERROR_LINES = 3;
 const MAX_ERROR_LINE_CHARS = 300;
 const MAX_CRASH_LINES = 15;
 
-export type RunStatus = "passed" | "failed" | "error" | "timeout" | "no_match";
+export type RunStatus =
+  "passed" | "failed" | "error" | "timeout" | "no_match" | "skipped";
 
 export function runStatus(outcome: RunOutcome): RunStatus {
   if (outcome.type === "timeout") return "timeout";
   if (outcome.type === "no_match") return "no_match";
+  if (outcome.type === "skipped") return "skipped";
   const { result } = outcome.record;
   if (result.error) return "error";
   return result.stats.failing > 0 ? "failed" : "passed";
@@ -49,6 +51,7 @@ const STATUS_WORD: Readonly<Record<RunStatus, string>> = {
   error: "ERROR",
   timeout: "TIMEOUT",
   no_match: "NO MATCH",
+  skipped: "SKIPPED",
 };
 
 /**
@@ -88,6 +91,11 @@ export function runHeadline(outcome: RunOutcome): string {
       return record.args.grep
         ? `${STATUS_WORD[status]} ${specs}: no test title contains "${record.args.grep}", nothing ran ${id}`
         : `${STATUS_WORD[status]} ${specs}: the test at that line did not run, nothing ran ${id}`;
+    case "skipped": {
+      const n = outcome.type === "skipped" ? outcome.skipped.length : 0;
+      const which = n === 1 ? "the matching test is" : `the ${n} matching tests are`;
+      return `${STATUS_WORD[status]} ${target}: ${which} skipped (it.skip or this.skip()), nothing ran ${id}`;
+    }
     case "timeout": {
       const where = result.runningTest ? ` while running "${result.runningTest}"` : "";
       return `${STATUS_WORD[status]} ${target}: stopped after ${seconds(result.stats.duration)}${where}; ${counts(record)} before it ${id}`;
@@ -153,6 +161,10 @@ export function renderRun(
         `tests in the spec: ${outcome.titles.slice(0, 20).map(quote).join(", ")}`,
       );
     }
+  }
+
+  if (outcome.type === "skipped") {
+    lines.push(`skipped: ${outcome.skipped.slice(0, 20).map(quote).join(", ")}`);
   }
 
   if (result.error && outcome.type === "completed") {

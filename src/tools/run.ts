@@ -71,7 +71,9 @@ export const runDataSchema = z.object({
   titles: z.array(z.string()).optional(),
   repeat: z.number().optional(),
   component: z.boolean().optional(),
-  status: z.enum(["passed", "failed", "error", "timeout", "no_match"]),
+  status: z
+    .enum(["passed", "failed", "error", "timeout", "no_match", "skipped"])
+    .describe("skipped: the tests the filter matched are skipped, so nothing ran"),
   stats: statsSchema,
   contextCaptured: z
     .boolean()
@@ -313,6 +315,11 @@ export function runNextActions(outcome: RunOutcome, status: RunStatus): string[]
     case "no_match":
       actions.push(
         "cypress_run with testName set to one of the titles above, or without testName for the whole spec",
+      );
+      break;
+    case "skipped":
+      actions.push(
+        "remove .skip (or the this.skip() call) from the test, then run again",
       );
       break;
     case "timeout":

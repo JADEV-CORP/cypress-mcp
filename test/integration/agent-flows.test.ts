@@ -306,6 +306,52 @@ describe("cypress_run with a testName that matches nothing (B1)", () => {
     );
     expect(miss.text).toContain('closest: "Checkout shows the cart page"');
   });
+
+  it("says the matching test is skipped instead of no match", async () => {
+    const skippedSpec = path.join(root, "cypress", "e2e", "skipped.cy.js");
+    fs.writeFileSync(
+      skippedSpec,
+      [
+        'describe("Search", () => {',
+        '  it("finds a product", () => {});',
+        '  it.skip("filters by price", () => {});',
+        "});",
+        "",
+      ].join("\n"),
+    );
+    try {
+      const byName = await call("cypress_run", {
+        spec: "cypress/e2e/skipped.cy.js",
+        testName: "filters by price",
+      });
+      expect(byName.isError).toBe(false);
+      expect(byName.text.split("\n").slice(0, 2)).toEqual([
+        `SKIPPED cypress/e2e/skipped.cy.js "filters by price": the matching test is skipped (it.skip or this.skip()), nothing ran (runId ${byName.structured.runId})`,
+        'skipped: "Search filters by price"',
+      ]);
+      expect(byName.structured.data).toMatchObject({
+        status: "skipped",
+        tests: [{ fullTitle: "Search filters by price", state: "pending" }],
+      });
+      expect(byName.structured.data["closestMatches"]).toBeUndefined();
+
+      const byLine = await call("cypress_run", { spec: "cypress/e2e/skipped.cy.js:3" });
+      expect(byLine.structured.data["status"]).toBe("skipped");
+
+      // The deprecated tool must not call it a pass either.
+      const legacy = await callLegacy("cypress_run_test", {
+        spec: "cypress/e2e/skipped.cy.js",
+        testName: "filters by price",
+      });
+      expect(legacy.isError).toBe(true);
+      expect(legacy.body.data).toMatchObject({
+        code: "TEST_SKIPPED",
+        skipped: ["Search filters by price"],
+      });
+    } finally {
+      fs.rmSync(skippedSpec, { force: true });
+    }
+  });
 });
 
 describe("cypress_get_failure", () => {

@@ -52,10 +52,20 @@ export type RunOutcome =
       /** Full titles declared in the specs, from the static parser */
       readonly titles: readonly string[];
       readonly closestMatches: readonly string[];
+    }
+  | {
+      /** The title filter matched, but every matching test is skipped */
+      readonly type: "skipped";
+      readonly record: RunRecord;
+      /** Full titles of the matching tests (it.skip, this.skip()) */
+      readonly skipped: readonly string[];
     };
 
 /** Markers of a config load that failed inside the wrapper, not the project. */
 const WRAPPER_MARKERS = ["cypress-mcp.config", "cypress-mcp-runtime"];
+
+/** What runtime/support.js appends to each copy of a repeated test. */
+const REPEAT_SUFFIX = / \(repeat \d+\/\d+\)$/;
 
 /**
  * Run Cypress once and record the run. Shared by the MCP tools and the CLI.
@@ -146,6 +156,17 @@ export async function executeCypressRun(
     !enriched.error &&
     enriched.stats.passing + enriched.stats.failing === 0
   ) {
+    // Something matched but did not run: the test is skipped in its source,
+    // which no other title would fix.
+    const skipped = enriched.tests
+      .filter(
+        (test) => test.state === "pending" && matchesFilter(test.fullTitle, request.args),
+      )
+      .map((test) => test.fullTitle);
+    if (skipped.length > 0) {
+      return { type: "skipped", record, skipped };
+    }
+
     const titles: string[] = [];
     for (const spec of request.specs) {
       const declared = await ctx.specFinder.parse(spec);
@@ -275,6 +296,19 @@ function assertRunsWithoutWrapper(args: CypressRunArgs, grep: boolean): void {
   if ((args.grep || args.titles?.length) && !grep) {
     throw new TitleFilterUnavailableError();
   }
+}
+
+/**
+ * Whether a test is one the title filter asked for. Without the wrapper,
+ * @cypress/grep reports the tests it filtered out as pending too, so pending
+ * alone does not tell.
+ */
+function matchesFilter(fullTitle: string, args: CypressRunArgs): boolean {
+  const title = fullTitle.replace(REPEAT_SUFFIX, "");
+  return (
+    (args.titles?.includes(title) ?? false) ||
+    (args.grep !== undefined && title.includes(args.grep))
+  );
 }
 
 /** The line that names the error, e.g. "Error: Cannot find module 'x'". */

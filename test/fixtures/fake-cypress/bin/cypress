@@ -114,7 +114,14 @@ const SPECS = {
       "CypressError: Expected to find element\n    at https://localhost:4000/__cypress/runner/cypress_runner.js:1:2\n    at Context.login (webpack://shop/./cypress/support/commands.js:3:8)",
     ],
   ],
+  "skipped.cy.js": [
+    ["Search", "finds a product", null],
+    ["Search", "filters by price", null],
+  ],
 };
+
+/** Tests declared with it.skip: Mocha reports them as pending. */
+const PENDING = new Set(["Search filters by price"]);
 
 /** The page the runtime records for a failure, by test title. */
 const PAGES = {
@@ -233,16 +240,17 @@ c.unref();`,
   const tests = [];
   for (const [suite, title, error, stack, retries] of SPECS[name] ?? SPECS["pass.cy.js"]) {
     const fullTitle = `${suite} ${title}`;
+    const ran = PENDING.has(fullTitle) ? "pending" : error ? "failed" : "passed";
     if (wrapped) {
       // The runtime omits filtered tests and registers kept ones `repeat` times.
       if (!wanted(fullTitle)) continue;
       for (let k = 1; k <= repeat; k++) {
         const suffix = repeat > 1 ? ` (repeat ${k}/${repeat})` : "";
-        tests.push({ title: title + suffix, fullTitle: fullTitle + suffix, base: fullTitle, state: error ? "failed" : "passed", retries: retries ?? 0, err: error ? { message: error, stack } : {} });
+        tests.push({ title: title + suffix, fullTitle: fullTitle + suffix, base: fullTitle, state: ran, retries: retries ?? 0, err: error ? { message: error, stack } : {} });
       }
     } else {
       // Like @cypress/grep without grepOmitFiltered: filtered tests are pending.
-      const state = grep && !fullTitle.includes(grep) ? "pending" : error ? "failed" : "passed";
+      const state = grep && !fullTitle.includes(grep) ? "pending" : ran;
       tests.push({ title, fullTitle, base: fullTitle, state, retries: retries ?? 0, err: error ? { message: error, stack } : {} });
     }
   }
