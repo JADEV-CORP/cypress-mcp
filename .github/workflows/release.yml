@@ -89,6 +89,21 @@ jobs:
             echo "published=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # npm can take minutes to serve a version after the publish job ends
+      # ("Your package is being processed"), and the registry checks npm.
+      # The 0.4.0 registry step failed this way.
+      - name: Wait until npm serves this version
+        if: steps.registry.outputs.published != 'true'
+        run: |
+          for _ in $(seq 1 40); do
+            if npm view "cypress-mcp@${GITHUB_REF_NAME#v}" version > /dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "npm does not serve cypress-mcp@${GITHUB_REF_NAME#v} after 10 minutes" >&2
+          exit 1
+
       - if: steps.registry.outputs.published != 'true'
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
