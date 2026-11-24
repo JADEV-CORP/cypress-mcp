@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.5.0 (2026-11-24)
+
+Setup in one command, a smaller run tool, and the 0.2 tool names gone as announced in 0.4.0.
+
+### New
+
+- `cypress-mcp init` writes the cypress server entry into the project's MCP client config, with the paths and timeouts each client needs. Without `--client` it sets up the clients the project already uses (`.mcp.json`, `.cursor/`, `.vscode/`, `.gemini/`, `.junie/`, `.devin/`, `.codex/`), else `.mcp.json`, and asks first in a terminal.
+- Other servers and settings in those files are kept. A `cypress` entry that differs is left alone unless `--force`, and a file it cannot edit safely is refused with the entry to add by hand. `--dry-run` prints without writing, `--json` prints a summary.
+- For Claude Desktop, Zed, JetBrains AI Assistant and the Copilot cloud agent, which keep their config outside the project, `--client` prints the entry with absolute paths and where it goes.
+
+### Breaking
+
+- `cypress_run` takes the Cypress Cloud options in one optional object, `cloud: {record, tags, group, ciBuildId}`, instead of four top-level arguments. A call that still sends them at the top level fails with a message that points at `cloud: {record: true}`. The record key still comes only from `CYPRESS_RECORD_KEY` in the server environment.
+- The 0.2 tool names (`cypress_run_spec`, `cypress_run_test`, `cypress_rerun_last`, `cypress_get_failure_context`, `cypress_get_last_run`, `cypress_get_screenshot`, `cypress_discover`) and the `--caps legacy` group are removed, as announced in 0.4.0. `--caps legacy` now logs the unknown caps warning, which says the group was removed in 0.5 and links the table of replacements.
+
+### Fixes
+
+- `--caps constructor` is reported as unknown instead of being accepted as a group.
+
+### Release
+
+- The release builds, tests, audits and packs in a job with read-only rights. A separate job publishes that tarball with the OIDC token, in the `release` environment that only accepts `v*` tags, after checking the tagged commit is on `main`. npm is pinned to an exact version in that job.
+
+### Upgrading
+
+- Replace `record: true, tags: [...]` in `cypress_run` calls with `cloud: {record: true, tags: [...]}`.
+- Replace each 0.2 tool name with its replacement from the README Upgrading table, and drop `legacy` from `--caps` and `CYPRESS_MCP_CAPS`.
+
 ## 0.4.1 (2026-11-24)
 
 Fixes from a review of 0.4.0 run against real Cypress, and a CLI that people can use as well as agents.
