@@ -65,7 +65,7 @@ Restart the client after each build. Two shortcuts:
 
 ```bash
 npm run build
-npm install --prefix test/e2e --no-save --no-package-lock cypress@latest @cypress/grep@latest typescript@5
+npm install --prefix test/e2e --no-save --no-package-lock cypress@latest @cypress/grep@latest typescript@5 mocha-junit-reporter@2
 node test/e2e/smoke.mjs
 ```
 

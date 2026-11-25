@@ -52,9 +52,11 @@ jobs:
 
       # In test/e2e, so every project under it resolves the same install.
       # typescript: the TS config variants need it on Cypress versions that
-      # load TS configs through ts-node.
+      # load TS configs through ts-node. mocha-junit-reporter: on Cypress 16.4
+      # and later the project's junit reporter loads from here; older versions
+      # still use their own copy.
       - name: Install Cypress ${{ matrix.cypress }}
-        run: npm install --prefix test/e2e --no-save --no-package-lock --no-audit --no-fund cypress@${{ matrix.cypress }} @cypress/grep@${{ matrix.grep }} typescript@5
+        run: npm install --prefix test/e2e --no-save --no-package-lock --no-audit --no-fund cypress@${{ matrix.cypress }} @cypress/grep@${{ matrix.grep }} typescript@5 mocha-junit-reporter@2
 
       # The first Cypress launch verifies the binary; do it once here so the smoke checks time real work.
       - run: npx --prefix test/e2e cypress verify
