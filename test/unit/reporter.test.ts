@@ -254,11 +254,120 @@ describe("cypress-mcp-reporter.cjs with a run folder and the project's reporter"
     );
   });
 
+  const BUNDLED = [
+    ["junit", "mocha-junit-reporter"],
+    ["teamcity", "mocha-teamcity-reporter"],
+  ];
+
+  it.each(BUNDLED)(
+    "loads the project's copy of %s when Cypress keeps its own in its bundle",
+    (name, pkg) => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cypress-mcp-bundled-"));
+      const seen = globalThis as { projectCopy?: object };
+      try {
+        const project = path.join(dir, "project");
+        writePackage(
+          project,
+          pkg,
+          "module.exports = function Inner(runner, options) { globalThis.projectCopy = options.reporterOptions; };",
+        );
+        const printed = runReporterOn(
+          { suite: { total: () => 0 } },
+          (runner) => runner.emit("end"),
+          {
+            reporterOptions: {
+              cypressMcpInner: {
+                name,
+                options: { mochaFile: "x.xml" },
+                projectRoot: project,
+              },
+            },
+          },
+          reporterLoadedByCypressBundle(dir, pkg),
+        );
+        expect(warningsIn(printed)).toEqual([]);
+        expect(seen.projectCopy).toEqual({ mochaFile: "x.xml" });
+      } finally {
+        delete seen.projectCopy;
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each(BUNDLED)(
+    "says which package to add when neither Cypress nor the project can load %s",
+    (name, pkg) => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cypress-mcp-bundled-"));
+      try {
+        const project = path.join(dir, "project");
+        fs.mkdirSync(project);
+        const printed = runReporterOn(
+          { suite: { total: () => 0 } },
+          (runner) => runner.emit("end"),
+          {
+            reporterOptions: {
+              cypressMcpInner: { name, options: {}, projectRoot: project },
+            },
+          },
+          reporterLoadedByCypressBundle(dir, pkg),
+        );
+        expect(warningsIn(printed)[0]).toContain(
+          `Add ${pkg} to the project's devDependencies`,
+        );
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  /** Writes node_modules/<pkg> under root: only its package.json, unless source is given. */
+  function writePackage(root: string, pkg: string, source?: string): void {
+    const dir = path.join(root, "node_modules", pkg);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "package.json"),
+      JSON.stringify({ name: pkg, main: "index.js" }),
+    );
+    if (source !== undefined) fs.writeFileSync(path.join(dir, "index.js"), source);
+  }
+
+  /**
+   * The reporter as Cypress 16.4 loads it: required from its start bundle,
+   * whose copy of `pkg` the binary build stripped down to its package.json.
+   */
+  function reporterLoadedByCypressBundle(
+    dir: string,
+    pkg: string,
+  ): typeof ReporterWithOptions {
+    const app = path.join(dir, "Cypress", "resources", "app");
+    writePackage(app, pkg);
+    const requireHere = createRequire(import.meta.url);
+    const reporterPath = requireHere.resolve("../../reporter/cypress-mcp-reporter.cjs");
+    const cached = requireHere.cache[reporterPath];
+    // A fresh copy, so that the bundle is the module that loaded it.
+    Reflect.deleteProperty(requireHere.cache, reporterPath);
+    try {
+      return createRequire(
+        path.join(app, "packages", "server", "start-cypress.bundle.js"),
+      )(reporterPath) as typeof ReporterWithOptions;
+    } finally {
+      requireHere.cache[reporterPath] = cached;
+    }
+  }
+
+  function warningsIn(printed: string): string[] {
+    const stream = new ReporterEventStream();
+    stream.push(printed);
+    stream.end();
+    return stream.warnings;
+  }
+
   /** Like runReporter, with runner fields and reporter options of the test's choice. */
   function runReporterOn(
     fields: object,
     drive: (runner: EventEmitter) => void,
     options?: object,
+    ReporterClass = ReporterWithOptions,
   ): string {
     const runner = Object.assign(new EventEmitter(), fields);
     const written: string[] = [];
@@ -269,7 +378,7 @@ describe("cypress-mcp-reporter.cjs with a run folder and the project's reporter"
         return true;
       });
     try {
-      new ReporterWithOptions(runner, options);
+      new ReporterClass(runner, options);
       drive(runner);
     } finally {
       write.mockRestore();

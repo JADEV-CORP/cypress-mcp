@@ -380,7 +380,7 @@ Each run goes through a wrapper config that cypress-mcp writes in `node_modules/
 
 - a support file that imports the project's own, then a small browser runtime. When a test fails, the runtime records the page at the failing command: the URL, a pruned DOM and ARIA outline (ids, `data-*`, roles, `aria-*`, text; about 3,000 tokens at most; password values never), console errors, failed requests, the Cypress command log, and selectors on the page that look like the one that found nothing. It also filters titles and repeats tests, so `testName`, `path:line` and `repeat` need no plugin.
 - the project's `setupNodeEvents`, chained after a task that receives that context.
-- the cypress-mcp reporter, with the project's own reporter (junit, mochawesome, cypress-multi-reporters, a file of its own) running on the same events, so its files are still written.
+- the cypress-mcp reporter, with the project's own reporter (junit, mochawesome, cypress-multi-reporters, a file of its own) running on the same events, so its files are still written. On Cypress 16.4 and later, `reporter: "junit"` or `"teamcity"` also needs `mocha-junit-reporter` or `mocha-teamcity-reporter` in the project's devDependencies: Cypress no longer lets other reporters load its built-in copy.
 
 Screenshots and videos go to that folder too, so two clients on one project, or a CI run next to an agent, never delete each other's files. The server keeps the folders of about the last 50 runs.
 

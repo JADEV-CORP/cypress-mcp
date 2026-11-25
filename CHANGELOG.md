@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- On Cypress 16.4 and later, `reporter: "junit"` or `"teamcity"` writes its files in cypress-mcp runs again once the project has `mocha-junit-reporter` or `mocha-teamcity-reporter` in its devDependencies. Cypress 16.4 no longer lets other reporters load its built-in copy. Without the package, the run's note says which one to add.
+
 ## 0.5.2 (2026-11-25)
 
 Same code as 0.5.1. This release lists the server in the MCP Registry under its new name, which 0.5.1 did not reach.

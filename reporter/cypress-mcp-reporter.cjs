@@ -122,8 +122,8 @@ function totalTests(runner) {
 /**
  * The project's reporter class, resolved the way Cypress resolves it: a file
  * or package in the project first, then the reporters Cypress bundles. Those
- * live in Cypress's own module snapshot, so they are required through the
- * module that loaded this reporter.
+ * are required through the module that loaded this reporter, so they come
+ * from Cypress's own install.
  */
 function loadInnerReporter(name, projectRoot) {
   const attempts = [];
@@ -133,13 +133,15 @@ function loadInnerReporter(name, projectRoot) {
     attempts.push(() => require(require.resolve(name, { paths: [projectRoot] })));
   }
   const parent = module.parent || require.main;
-  if (parent) {
-    if (BUNDLED_REPORTERS[name])
-      attempts.push(() => parent.require(BUNDLED_REPORTERS[name]));
-    if (MOCHA_REPORTERS.has(name)) {
-      attempts.push(() => parent.require(`mocha-7.2.0/lib/reporters/${name}`));
-      attempts.push(() => parent.require(`mocha/lib/reporters/${name}`));
-    }
+  const bundled = BUNDLED_REPORTERS[name];
+  if (parent && bundled) attempts.push(() => parent.require(bundled));
+  // Cypress 16.4 and later build these into their start bundle and delete the
+  // files, so a copy the project installs is the next place to look.
+  if (projectRoot && bundled)
+    attempts.push(() => requireFromProject(bundled, projectRoot));
+  if (parent && MOCHA_REPORTERS.has(name)) {
+    attempts.push(() => parent.require(`mocha-7.2.0/lib/reporters/${name}`));
+    attempts.push(() => parent.require(`mocha/lib/reporters/${name}`));
   }
 
   let lastError;
@@ -153,6 +155,19 @@ function loadInnerReporter(name, projectRoot) {
     }
   }
   throw lastError || new Error(`reporter "${name}" not found`);
+}
+
+/** A reporter Cypress bundles, from the project's own install of its package. */
+function requireFromProject(packageName, projectRoot) {
+  let file;
+  try {
+    file = require.resolve(packageName, { paths: [projectRoot] });
+  } catch {
+    throw new Error(
+      `Cypress 16.4 and later no longer let other reporters load their built-in copy. Add ${packageName} to the project's devDependencies to get its reports in cypress-mcp runs.`,
+    );
+  }
+  return require(file);
 }
 
 function CypressMcpReporter(runner, options) {
