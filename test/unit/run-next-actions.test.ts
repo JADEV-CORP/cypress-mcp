@@ -9,7 +9,6 @@ function completed(result: Partial<CypressRunResult>): RunOutcome {
     type: "completed",
     record: {
       runId: "run_3",
-      kind: "run_spec",
       spec: "cypress/e2e/login.cy.ts",
       specs: ["cypress/e2e/login.cy.ts"],
       projectRoot: "/work/shop",
