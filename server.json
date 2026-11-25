@@ -7,13 +7,13 @@
     "url": "https://github.com/JADEV-CORP/cypress-mcp",
     "source": "github"
   },
-  "version": "0.5.2",
+  "version": "0.5.3",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "cypress-mcp",
-      "version": "0.5.2",
+      "version": "0.5.3",
       "transport": {
         "type": "stdio"
       },
