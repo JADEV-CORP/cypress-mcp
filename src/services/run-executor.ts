@@ -25,7 +25,6 @@ import { closestTitles } from "../utils/closest-match.js";
 import { enrichRunResult } from "../utils/run-results.js";
 
 export interface RunRequest {
-  readonly kind: RunRecord["kind"];
   /** Spec files of the run, project relative, already resolved */
   readonly specs: readonly string[];
   readonly args: CypressRunArgs;
@@ -133,7 +132,6 @@ export async function executeCypressRun(
   };
 
   const record = ctx.stateStore.recordRun(
-    request.kind,
     request.specs[0] ?? request.args.spec,
     request.args,
     enriched,
@@ -333,7 +331,7 @@ async function recordTimedOutRun(
   workspace: RunWorkspace,
   warnings: readonly string[],
 ): Promise<RunRecord> {
-  const { kind, args } = request;
+  const { args } = request;
   const partial = err.partial!;
 
   const tests: TestResult[] = partial.completed
@@ -384,7 +382,6 @@ async function recordTimedOutRun(
   const screenshots = (await listScreenshots(workspace)).reverse();
   const withPages = attachPageContexts(result, await readContexts(workspace));
   return ctx.stateStore.recordRun(
-    kind,
     request.specs[0] ?? args.spec,
     args,
     enrichRunResult(withPages, screenshots),
