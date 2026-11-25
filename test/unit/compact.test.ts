@@ -18,7 +18,6 @@ const ROOT = "/work/shop";
 function record(result: Partial<CypressRunResult>, grep?: string): RunRecord {
   return {
     runId: "run_7",
-    kind: grep ? "run_test" : "run_spec",
     spec: "cypress/e2e/big.cy.js",
     specs: ["cypress/e2e/big.cy.js"],
     projectRoot: ROOT,
