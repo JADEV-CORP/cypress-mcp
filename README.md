@@ -1,6 +1,7 @@
 # cypress-mcp
 
 [![npm version](https://img.shields.io/npm/v/cypress-mcp.svg)](https://www.npmjs.com/package/cypress-mcp)
+[![npm downloads](https://img.shields.io/npm/dm/cypress-mcp.svg)](https://www.npmjs.com/package/cypress-mcp)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![CI](https://github.com/JADEV-CORP/cypress-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/JADEV-CORP/cypress-mcp/actions/workflows/ci.yml)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D22.12-brightgreen.svg)](https://nodejs.org)

@@ -1,10 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.5.2 (2026-11-25)
+
+Same code as 0.5.1. This release lists the server in the MCP Registry under its new name, which 0.5.1 did not reach.
 
 ### Release
 
 - The MCP Registry job passes the DNS signing key with `--private-key`, the only place mcp-publisher reads it. 0.5.1 reached npm but not the registry because of this.
+
+### Docs
+
+- The README shows monthly npm downloads next to the version.
 
 ## 0.5.1 (2026-11-24)
 
