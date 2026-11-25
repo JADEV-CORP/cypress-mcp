@@ -13,7 +13,6 @@ export const LAST_RUN = "last";
 
 export interface RunRecord {
   readonly runId: string;
-  readonly kind: "run_spec" | "run_test";
   /** The spec, or the first of several; project relative */
   readonly spec: string;
   /** Every spec of the run, project relative */
@@ -47,7 +46,6 @@ export class StateStore {
   }
 
   recordRun(
-    kind: "run_spec" | "run_test",
     spec: string,
     args: CypressRunArgs,
     result: CypressRunResult,
@@ -63,7 +61,6 @@ export class StateStore {
   ): RunRecord {
     const record: RunRecord = {
       runId: meta.runId ?? this.allocateRunId(),
-      kind,
       spec,
       specs: meta.specs ?? [spec],
       projectRoot: meta.projectRoot ?? "",
