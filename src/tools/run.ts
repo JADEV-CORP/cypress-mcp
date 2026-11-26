@@ -178,7 +178,6 @@ export function register(server: McpServer, ctx: ToolContext): void {
         const run = await prepareRun(ctx, input);
         const progress = progressNotifier(request);
         const outcome = await executeCypressRun(run.ctx, {
-          kind: run.args.grep || run.args.titles ? "run_test" : "run_spec",
           specs: run.specs,
           prefix: run.prefix,
           args: run.args,

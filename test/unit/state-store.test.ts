@@ -31,7 +31,6 @@ describe("StateStore", () => {
   it("should record and retrieve a run with full metadata", () => {
     const store = new StateStore();
     const record = store.recordRun(
-      "run_spec",
       "spec.cy.ts",
       mockArgs,
       mockResult,
@@ -40,7 +39,6 @@ describe("StateStore", () => {
     );
 
     expect(record.runId).toMatch(/^run_/);
-    expect(record.kind).toBe("run_spec");
     expect(record.spec).toBe("spec.cy.ts");
     expect(record.args).toBe(mockArgs);
     expect(record.stdoutTail).toBe("stdout");
@@ -52,7 +50,7 @@ describe("StateStore", () => {
 
   it("should return screenshots by spec", () => {
     const store = new StateStore();
-    store.recordRun("run_spec", "spec.cy.ts", mockArgs, mockResult, "", "");
+    store.recordRun("spec.cy.ts", mockArgs, mockResult, "", "");
 
     const screenshots = store.getScreenshots("spec.cy.ts");
     expect(screenshots).toHaveLength(1);
@@ -61,13 +59,13 @@ describe("StateStore", () => {
 
   it("should return empty array for unknown spec", () => {
     const store = new StateStore();
-    store.recordRun("run_spec", "spec.cy.ts", mockArgs, mockResult, "", "");
+    store.recordRun("spec.cy.ts", mockArgs, mockResult, "", "");
     expect(store.getScreenshots("other.cy.ts")).toHaveLength(0);
   });
 
   it("should clear all state", () => {
     const store = new StateStore();
-    store.recordRun("run_spec", "spec.cy.ts", mockArgs, mockResult, "", "");
+    store.recordRun("spec.cy.ts", mockArgs, mockResult, "", "");
     store.clear();
 
     expect(store.getRun()).toBeNull();
@@ -81,7 +79,7 @@ describe("StateStore", () => {
       browser: "chrome",
       grep: "should login",
     };
-    store.recordRun("run_test", "login.cy.ts", args, mockResult, "", "");
+    store.recordRun("login.cy.ts", args, mockResult, "", "");
 
     const last = store.getRun();
     expect(last?.args.grep).toBe("should login");
@@ -90,16 +88,9 @@ describe("StateStore", () => {
 
   it("should clear stale screenshot entries after a clean rerun", () => {
     const store = new StateStore();
-    store.recordRun("run_spec", "spec.cy.ts", mockArgs, mockResult, "", "");
+    store.recordRun("spec.cy.ts", mockArgs, mockResult, "", "");
 
-    store.recordRun(
-      "run_spec",
-      "spec.cy.ts",
-      mockArgs,
-      { ...mockResult, screenshots: [] },
-      "",
-      "",
-    );
+    store.recordRun("spec.cy.ts", mockArgs, { ...mockResult, screenshots: [] }, "", "");
 
     expect(store.getScreenshots("spec.cy.ts")).toEqual([]);
   });
@@ -108,8 +99,8 @@ describe("StateStore", () => {
 describe("StateStore runs by id", () => {
   it("returns each run by its id and the latest for last", () => {
     const store = new StateStore();
-    const first = store.recordRun("run_spec", "a.cy.ts", mockArgs, mockResult, "", "");
-    const second = store.recordRun("run_spec", "b.cy.ts", mockArgs, mockResult, "", "");
+    const first = store.recordRun("a.cy.ts", mockArgs, mockResult, "", "");
+    const second = store.recordRun("b.cy.ts", mockArgs, mockResult, "", "");
 
     expect(store.getRun(first.runId)).toBe(first);
     expect(store.getRun(second.runId)).toBe(second);
@@ -123,7 +114,7 @@ describe("StateStore runs by id", () => {
     const store = new StateStore();
     store.clear();
     for (let i = 0; i < MAX_STORED_RUNS + 5; i++) {
-      store.recordRun("run_spec", "a.cy.ts", mockArgs, mockResult, "", "");
+      store.recordRun("a.cy.ts", mockArgs, mockResult, "", "");
     }
 
     expect(store.runIds()).toHaveLength(MAX_STORED_RUNS);

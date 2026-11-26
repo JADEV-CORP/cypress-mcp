@@ -260,7 +260,6 @@ async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
       env: Object.keys(env).length > 0 ? env : undefined,
     });
     const outcome = await executeCypressRun(run.ctx, {
-      kind: run.args.grep || run.args.titles ? "run_test" : "run_spec",
       specs: run.specs,
       prefix: run.prefix,
       args: run.args,
