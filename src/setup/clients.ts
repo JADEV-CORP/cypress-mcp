@@ -17,6 +17,7 @@ export const PROJECT_CLIENTS = [
   "vscode",
   "vscode-legacy",
   "cursor",
+  "kiro",
   "gemini",
   "junie",
   "devin",
@@ -40,6 +41,7 @@ export const CLIENT_NAMES: Readonly<Record<ClientId, string>> = {
   vscode: "VS Code Copilot",
   "vscode-legacy": "VS Code, .vscode/mcp.json",
   cursor: "Cursor",
+  kiro: "Kiro",
   gemini: "Gemini CLI",
   junie: "JetBrains Junie",
   devin: "Devin Desktop",
@@ -73,6 +75,7 @@ const FILES: Readonly<Record<ProjectClientId, ProjectFile>> = {
   vscode: { file: ".mcp.json", format: "json", container: "mcpServers" },
   "vscode-legacy": { file: ".vscode/mcp.json", format: "json", container: "servers" },
   cursor: { file: ".cursor/mcp.json", format: "json", container: "mcpServers" },
+  kiro: { file: ".kiro/settings/mcp.json", format: "json", container: "mcpServers" },
   gemini: { file: ".gemini/settings.json", format: "json", container: "mcpServers" },
   junie: { file: ".junie/mcp/mcp.json", format: "json", container: "mcpServers" },
   devin: { file: ".devin/mcp_config.json", format: "json", container: "mcpServers" },
@@ -146,6 +149,9 @@ function projectEntry(id: ProjectClientId, root: string): ServerEntry {
     case "vscode-legacy":
     case "cursor":
       return { type: "stdio", command: "npx", args: serverArgs(WORKSPACE) };
+    case "kiro":
+      // Use an absolute path because the Kiro docs don't specify workspace interpolation for args.
+      return { command: "npx", args: serverArgs(root) };
     case "gemini":
       return { command: "npx", args: serverArgs(), cwd: root, timeout: TIMEOUT_MS };
     case "junie":
@@ -279,6 +285,7 @@ const MARKERS: readonly (readonly [string, ProjectClientId])[] = [
   [".vscode/mcp.json", "vscode-legacy"],
   [".vscode", "vscode"],
   [".cursor", "cursor"],
+  [".kiro", "kiro"],
   [".gemini", "gemini"],
   [".junie", "junie"],
   [".devin", "devin"],

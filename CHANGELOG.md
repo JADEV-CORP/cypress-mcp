@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- `cypress-mcp init` detects Kiro projects and can write their workspace MCP configuration.
+- Project setup refuses config paths that resolve outside the project, including during a dry run.
+
 ## 0.5.3 (2026-11-25)
 
 ### Fixes

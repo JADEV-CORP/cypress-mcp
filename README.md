@@ -79,7 +79,7 @@ npx cypress-mcp init                                  # the clients the project 
 npx cypress-mcp init --client cursor,codex --dry-run  # print what it would write
 ```
 
-It finds the Cypress project the way the server does, then sets up the clients whose files are in the project (`.mcp.json`, `.claude/`, `.vscode/`, `.cursor/`, `.gemini/`, `.junie/`, `.devin/`, `.codex/`), or `.mcp.json` for Claude Code when there are none. In a terminal it asks first; `--yes` skips the question. Other servers and settings in those files are kept, and a `cypress` entry that differs is left alone unless `--force`. Paths are relative (`${workspaceFolder}`) where the client supports it, so the file can be committed; the output names the files that hold an absolute path. For Claude Desktop, Zed, JetBrains AI Assistant and the Copilot cloud agent, `--client claude-desktop` (or `zed`, `jetbrains`, `copilot-cloud`) prints the entry with your paths and where it goes. Then restart or reload the client and ask the agent to run `cypress_doctor`. `npx cypress-mcp init --help` lists the client names and options.
+It finds the Cypress project the way the server does, then sets up the clients whose files are in the project (`.mcp.json`, `.claude/`, `.vscode/`, `.cursor/`, `.kiro/`, `.gemini/`, `.junie/`, `.devin/`, `.codex/`), or `.mcp.json` for Claude Code when there are none. In a terminal it asks first; `--yes` skips the question. Other servers and settings in those files are kept, and a `cypress` entry that differs is left alone unless `--force`. Paths are relative (`${workspaceFolder}`) where the client supports it, so the file can be committed; the output names the files that hold an absolute path. For Claude Desktop, Zed, JetBrains AI Assistant and the Copilot cloud agent, `--client claude-desktop` (or `zed`, `jetbrains`, `copilot-cloud`) prints the entry with your paths and where it goes. Then restart or reload the client and ask the agent to run `cypress_doctor`. `npx cypress-mcp init --help` lists the client names and options.
 
 ### Timeouts
 
@@ -260,6 +260,12 @@ cursor://anysphere.cursor-deeplink/mcp/install?name=cypress&config=eyJjb21tYW5kI
 ```
 
 The link carries no `--cwd`: if `cypress_doctor` does not find your project, add `"--cwd", "/path/to/your/project"` to the server's `args`. Sources: [Cursor MCP](https://cursor.com/docs/mcp), [install links](https://cursor.com/docs/mcp/install-links).
+
+### Kiro
+
+Run `npx cypress-mcp init --client kiro` from the Cypress project root. This writes the `cypress` server entry under `mcpServers` in `.kiro/settings/mcp.json`. The generated `--cwd` argument is an absolute path to your checkout.
+
+Kiro CLI documents a `timeout` field for connection startup. The shared workspace entry uses Kiro's defaults. [Kiro MCP configuration](https://kiro.dev/docs/mcp/configuration/)
 
 ### Windsurf (Devin Desktop)
 

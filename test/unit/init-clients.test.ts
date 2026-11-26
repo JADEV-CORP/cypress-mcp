@@ -91,6 +91,20 @@ describe("the entry written for each client in the project", () => {
     });
   });
 
+  it("Kiro: .kiro/settings/mcp.json with the project path", () => {
+    expect(parseClients(["Kiro"])).toEqual({ clients: ["kiro"], unknown: [] });
+    const target = only("kiro");
+    expect(target).toMatchObject({
+      file: ".kiro/settings/mcp.json",
+      container: "mcpServers",
+      machinePath: true,
+    });
+    expect(target.entry).toEqual({
+      command: "npx",
+      args: ["-y", "cypress-mcp", "--cwd", ROOT],
+    });
+  });
+
   it("Gemini CLI: .gemini/settings.json with cwd and a timeout", () => {
     const target = only("gemini");
     expect(target).toMatchObject({
@@ -278,6 +292,7 @@ describe("clients found in the project", () => {
     ).toEqual(["vscode", "cursor", "gemini", "junie", "devin", "codex"]);
     expect(detectClients(folder(".mcp.json"))).toEqual(["claude"]);
     expect(detectClients(folder(".claude/"))).toEqual(["claude"]);
+    expect(detectClients(folder(".kiro/"))).toEqual(["kiro"]);
   });
 
   it("keeps VS Code in .vscode/mcp.json when the project already has one", () => {

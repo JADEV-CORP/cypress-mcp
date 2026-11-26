@@ -6,7 +6,7 @@
 // prints the entry for clients configured outside the project. Most setup
 // mistakes came from copying JSON from the README by hand: a wrong key, a
 // relative --cwd, no timeout.
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -18,6 +18,7 @@ import {
 } from "../services/projects.js";
 import type { ToolContext } from "../types/index.js";
 import { CypressMcpError } from "../utils/errors.js";
+import { resolveInsideRoot } from "../utils/paths.js";
 import {
   CLIENT_NAMES,
   configTargets,
@@ -159,9 +160,15 @@ async function applyTarget(
     snippet: snippet(target),
   };
 
+  let destination: string;
+  try {
+    destination = await configDestination(root, target.file);
+  } catch (err) {
+    return { ...base, status: "refused", written: false, reason: message(err) };
+  }
   let existing: string | undefined;
   try {
-    existing = await readFile(absolute, "utf-8");
+    existing = await readFile(destination, "utf-8");
   } catch (err) {
     if (errorCode(err) !== "ENOENT") {
       return {
@@ -181,8 +188,8 @@ async function applyTarget(
   if (dryRun || text === undefined) return report;
 
   try {
-    await mkdir(path.dirname(absolute), { recursive: true });
-    await writeFile(absolute, text);
+    await mkdir(path.dirname(destination), { recursive: true });
+    await writeFile(destination, text);
   } catch (err) {
     return {
       ...base,
@@ -192,6 +199,25 @@ async function applyTarget(
     };
   }
   return { ...report, written: true };
+}
+
+async function configDestination(root: string, file: string): Promise<string> {
+  const project = await realpath(root);
+  let current = project;
+  for (const component of file.split("/")) {
+    current = path.join(current, component);
+    try {
+      await lstat(current);
+    } catch (err) {
+      if (errorCode(err) === "ENOENT") continue;
+      throw err;
+    }
+    current = await realpath(current);
+    if (resolveInsideRoot(project, current) === null) {
+      throw new Error("config path resolves outside the project");
+    }
+  }
+  return current;
 }
 
 /** The entry as it sits in the file. */
