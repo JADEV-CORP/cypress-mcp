@@ -72,10 +72,10 @@ cypress-mcp init [--client <name>] [options]
 Adds the cypress server to the project's MCP client config files, keeping
 what else they hold, with the paths and timeouts each client needs. Without
 --client: the clients whose files are in the project (.mcp.json, .claude,
-.vscode, .cursor, .gemini, .junie, .devin, .codex), else .mcp.json for
-Claude Code. In a terminal it asks first.
-  --client <name>     claude, vscode, vscode-legacy, cursor, gemini, junie,
-                      devin, codex; printed, not written: claude-desktop,
+.vscode, .cursor, .roo, .gemini, .junie, .devin, .codex), else .mcp.json
+for Claude Code. In a terminal it asks first.
+  --client <name>     claude, vscode, vscode-legacy, cursor, roo, gemini,
+                      junie, devin, codex; printed, not written: claude-desktop,
                       zed, jetbrains, copilot-cloud. Repeatable or a comma list
   --force             replace a cypress entry that differs
   --dry-run           print what would be written, write nothing

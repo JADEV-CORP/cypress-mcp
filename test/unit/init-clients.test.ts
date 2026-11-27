@@ -91,6 +91,23 @@ describe("the entry written for each client in the project", () => {
     });
   });
 
+  it("Roo Code: .roo/mcp.json with ${workspaceFolder} and a timeout in s", () => {
+    expect(parseClients(["Roo"])).toEqual({ clients: ["roo"], unknown: [] });
+    const target = only("roo");
+    expect(target).toMatchObject({
+      file: ".roo/mcp.json",
+      format: "json",
+      container: "mcpServers",
+      clients: ["roo"],
+      machinePath: false,
+    });
+    expect(target.entry).toEqual({
+      command: "npx",
+      args: ["-y", "cypress-mcp", "--cwd", "${workspaceFolder}"],
+      timeout: 900,
+    });
+  });
+
   it("Kiro: .kiro/settings/mcp.json with the project path", () => {
     expect(parseClients(["Kiro"])).toEqual({ clients: ["kiro"], unknown: [] });
     const target = only("kiro");
@@ -293,6 +310,7 @@ describe("clients found in the project", () => {
     expect(detectClients(folder(".mcp.json"))).toEqual(["claude"]);
     expect(detectClients(folder(".claude/"))).toEqual(["claude"]);
     expect(detectClients(folder(".kiro/"))).toEqual(["kiro"]);
+    expect(detectClients(folder(".roo/"))).toEqual(["roo"]);
   });
 
   it("keeps VS Code in .vscode/mcp.json when the project already has one", () => {

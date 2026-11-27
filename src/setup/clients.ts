@@ -17,6 +17,7 @@ export const PROJECT_CLIENTS = [
   "vscode",
   "vscode-legacy",
   "cursor",
+  "roo",
   "kiro",
   "gemini",
   "junie",
@@ -41,6 +42,7 @@ export const CLIENT_NAMES: Readonly<Record<ClientId, string>> = {
   vscode: "VS Code Copilot",
   "vscode-legacy": "VS Code, .vscode/mcp.json",
   cursor: "Cursor",
+  roo: "Roo Code",
   kiro: "Kiro",
   gemini: "Gemini CLI",
   junie: "JetBrains Junie",
@@ -75,6 +77,7 @@ const FILES: Readonly<Record<ProjectClientId, ProjectFile>> = {
   vscode: { file: ".mcp.json", format: "json", container: "mcpServers" },
   "vscode-legacy": { file: ".vscode/mcp.json", format: "json", container: "servers" },
   cursor: { file: ".cursor/mcp.json", format: "json", container: "mcpServers" },
+  roo: { file: ".roo/mcp.json", format: "json", container: "mcpServers" },
   kiro: { file: ".kiro/settings/mcp.json", format: "json", container: "mcpServers" },
   gemini: { file: ".gemini/settings.json", format: "json", container: "mcpServers" },
   junie: { file: ".junie/mcp/mcp.json", format: "json", container: "mcpServers" },
@@ -149,6 +152,11 @@ function projectEntry(id: ProjectClientId, root: string): ServerEntry {
     case "vscode-legacy":
     case "cursor":
       return { type: "stdio", command: "npx", args: serverArgs(WORKSPACE) };
+    case "roo":
+      // Roo Code's McpHub replaces ${workspaceFolder} with the first workspace
+      // folder before it starts the server. Its timeout is per tool call, in
+      // seconds (1 to 3600), 60 by default.
+      return { command: "npx", args: serverArgs(WORKSPACE), timeout: TIMEOUT_MS / 1000 };
     case "kiro":
       // Use an absolute path because the Kiro docs don't specify workspace interpolation for args.
       return { command: "npx", args: serverArgs(root) };
@@ -285,6 +293,7 @@ const MARKERS: readonly (readonly [string, ProjectClientId])[] = [
   [".vscode/mcp.json", "vscode-legacy"],
   [".vscode", "vscode"],
   [".cursor", "cursor"],
+  [".roo", "roo"],
   [".kiro", "kiro"],
   [".gemini", "gemini"],
   [".junie", "junie"],
